@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ZONE WARS — a retro RTS in the spirit of Z</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="hud-top">
+      <div class="hud-block">
+        <span class="label">SECTORS</span>
+        <span id="blue-sectors" class="value team-blue">0</span>
+        <span class="vs">/</span>
+        <span id="red-sectors" class="value team-red">0</span>
+      </div>
+      <div class="hud-block">
+        <span class="label">UNITS</span>
+        <span id="blue-units" class="value team-blue">0</span>
+        <span class="vs">/</span>
+        <span id="red-units" class="value team-red">0</span>
+      </div>
+      <div class="hud-block">
+        <span class="label">SPEED ×</span>
+        <span id="blue-speed" class="value team-blue">1.0</span>
+        <span class="vs">/</span>
+        <span id="red-speed" class="value team-red">1.0</span>
+      </div>
+      <div class="hud-block">
+        <span class="label">FORT HP</span>
+        <span id="blue-fort" class="value team-blue">100</span>
+        <span class="vs">/</span>
+        <span id="red-fort" class="value team-red">100</span>
+      </div>
+      <div class="hud-block grow">
+        <span id="clock" class="value">00:00</span>
+      </div>
+    </div>
+
+    <div id="stage">
+      <canvas id="game"></canvas>
+      <div id="overlay" class="hidden">
+        <div class="overlay-card">
+          <h1 id="overlay-title">ZONE WARS</h1>
+          <p id="overlay-text"></p>
+          <button id="overlay-btn">START</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="hud-bottom">
+      <div id="factory-panel">
+        <div class="panel-title">SELECTED FACTORY — set production</div>
+        <div id="build-buttons"></div>
+      </div>
+      <div id="help">
+        <strong>Drag</strong> to box-select your units ·
+        <strong>Right-click</strong> to move/attack ·
+        <strong>H</strong> hold position ·
+        <strong>Click a flag's factory</strong> to choose what it builds ·
+        Walk infantry into an empty vehicle to crew it ·
+        Snipers can kill drivers through armor ·
+        Win by elimination, fort destruction, or by walking a unit into the enemy fort.
+      </div>
+    </div>
+  </div>
+
+  <!-- plain scripts (no build step, runs from file:// or any static host) -->
+  <script src="js/config.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/pathfinding.js"></script>
+  <script src="js/entities.js"></script>
+  <script src="js/sectors.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/input.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
