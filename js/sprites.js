@@ -36,6 +36,11 @@ const Sprites = {
       this.cache["gbase:" + team] = bakeStatic(28, (g) => drawGunBase(g, CFG.TEAM_PAL[team]));
       this.cache["gturr:" + team] = bake(28, (g) => drawGunTurret(g, CFG.TEAM_PAL[team]), 1);
     }
+
+    // production buildings (static, detailed pixel art)
+    for (const ft of ["robot", "vehicle", "gun"])
+      for (const team of ["blue", "red", "neutral"])
+        this.cache["bld:" + ft + ":" + team] = bakeStatic(56, (g) => drawBuilding(g, CFG.TEAM_PAL[team], ft));
   },
 
   infantry(type, team, dir, frame) { return this.cache["inf:" + type + ":" + team][dir][frame]; },
@@ -43,6 +48,7 @@ const Sprites = {
   turret(type, team, dir)          { return this.cache["turr:" + type + ":" + team][dir][0]; },
   gunBase(team)                    { return this.cache["gbase:" + team]; },
   gunTurret(team, dir)             { return this.cache["gturr:" + team][dir][0]; },
+  building(ft, team)               { return this.cache["bld:" + ft + ":" + team]; },
 };
 
 /* ---- baking helpers ---------------------------------------------------- */
@@ -252,4 +258,123 @@ function drawGunTurret(g, pal) {
   px(g, 3, -2, 9, 4, pal.metalLo);
   px(g, 4, -1, 8, 2, "#1c1c1c");
   px(g, 11, -2, 1, 4, "#333");
+}
+
+/* =========================================================================
+ * PRODUCTION BUILDINGS — detailed pixel art, drawn facing the camera.
+ * Animated bits (status lights, beacon, smoke) are layered at runtime.
+ * ========================================================================= */
+function tint(hex, f) {
+  let h = hex.replace("#", "");
+  if (h.length === 3) h = h.split("").map(c => c + c).join("");
+  const r = Math.max(0, Math.min(255, Math.round(parseInt(h.slice(0, 2), 16) * f)));
+  const g = Math.max(0, Math.min(255, Math.round(parseInt(h.slice(2, 4), 16) * f)));
+  const b = Math.max(0, Math.min(255, Math.round(parseInt(h.slice(4, 6), 16) * f)));
+  return `rgb(${r},${g},${b})`;
+}
+
+// shared industrial tones
+const CON = "#3a3d42", CONL = "#2c2f33", CON2 = "#46494f";
+const DRK = "#15171a", MID = "#23262a", STEEL = "#4a4e54";
+
+function drawBuilding(g, pal, ft) {
+  if (ft === "robot") drawRobotFactory(g, pal);
+  else if (ft === "vehicle") drawVehicleFactory(g, pal);
+  else drawGunFactory(g, pal);
+}
+
+/* Robot factory — domed silo with a hangar door (the classic Z look). */
+function drawRobotFactory(g, pal) {
+  const M = pal.metal, ML = pal.metalLo, D = pal.dark, MA = pal.main;
+  px(g, -20, 16, 40, 4, "rgba(0,0,0,0.28)");          // shadow
+
+  // cylindrical silo body with column shading
+  px(g, -15, -6, 30, 22, ML);
+  px(g, -14, -6, 28, 22, CON);
+  px(g, -13, -6, 9, 22, CON2);
+  px(g, -6, -6, 5, 22, tint(CON, 1.18));
+  px(g, 9, -6, 5, 22, CONL);
+
+  // dome
+  for (let i = 0; i < 15; i++) {
+    const t = i / 15, w = Math.round(16 * Math.sqrt(1 - t * t)), y = -7 - i;
+    px(g, -w, y, 2 * w, 1, ML);
+    px(g, -w + 1, y, Math.max(1, Math.round(w * 1.0)), 1, M);
+    px(g, -Math.round(w * 0.35), y, Math.max(1, Math.round(w * 0.5)), 1, tint(M, 1.22));
+  }
+  px(g, -16, -7, 32, 2, MA); px(g, -16, -7, 32, 1, tint(MA, 1.3));   // team band
+
+  px(g, 12, -26, 2, 9, DRK);                           // antenna mast (beacon at runtime)
+
+  // hangar door
+  px(g, -8, 3, 16, 12, DRK);
+  for (let y = 5; y < 15; y += 3) px(g, -7, y, 14, 1, MID);
+  px(g, -9, 2, 18, 2, D); px(g, -9, 2, 18, 1, tint(MA, 1.2));
+
+  // emblem sign (robot head)
+  px(g, -7, -3, 14, 5, "#0c0d0f");
+  px(g, -3, -2, 6, 4, MA); px(g, -2, -1, 1, 1, "#0c0d0f"); px(g, 1, -1, 1, 1, "#0c0d0f");
+
+  px(g, -13, 0, 3, 3, "#ffd24a"); px(g, 10, 0, 3, 3, "#ffd24a");      // lit windows
+  px(g, -14, -5, 1, 1, "#101010"); px(g, 13, -4, 1, 1, "#101010");    // rivets
+}
+
+/* Vehicle factory — wide hall, gantry, big bay door, status panel, stack. */
+function drawVehicleFactory(g, pal) {
+  const M = pal.metal, ML = pal.metalLo, D = pal.dark, MA = pal.main;
+  px(g, -24, 16, 48, 4, "rgba(0,0,0,0.28)");
+
+  // main hall
+  px(g, -22, -8, 44, 24, ML);
+  px(g, -21, -7, 42, 22, CON);
+  for (let x = -20; x < 21; x += 3) px(g, x, -3, 2, 17, CON2);        // corrugation
+  px(g, -21, 12, 42, 3, CONL);
+
+  // roof + stepped skylights + gantry
+  px(g, -23, -12, 46, 5, D); px(g, -23, -12, 46, 1, tint(MA, 1.2));
+  for (let x = -20; x < 20; x += 8) { px(g, x, -11, 6, 1, M); px(g, x + 1, -12, 4, 1, tint(M, 1.25)); }
+  px(g, -18, -15, 36, 2, STEEL); px(g, -18, -16, 36, 1, "#5e636a");
+
+  // chimney
+  px(g, -20, -23, 5, 12, "#2a2a2a"); px(g, -21, -24, 7, 2, D); px(g, -20, -23, 2, 12, "#3a3a3a");
+
+  // big segmented vehicle bay door
+  px(g, -12, -1, 24, 15, DRK);
+  for (let y = 1; y < 14; y += 3) px(g, -11, y, 22, 1, MID);
+  px(g, -13, -2, 26, 2, MA); px(g, -13, -2, 26, 1, tint(MA, 1.3));
+  px(g, -3, 3, 6, 7, "#0c0d0f"); px(g, -2, 4, 4, 5, MA);             // bay number plate
+
+  px(g, 15, -6, 5, 12, "#0c0d0f");                                    // status-light sockets
+  px(g, -23, -6, 2, 16, "#3a3a3a"); px(g, -24, -2, 3, 2, "#2a2a2a"); // side pipe
+  for (let x = -18; x < -2; x += 5) px(g, x, -6, 3, 3, "#ffd24a");    // window row
+  px(g, 20, -6, 1, 1, "#101010"); px(g, -21, -6, 1, 1, "#101010");
+}
+
+/* Gun factory — armored bunker with battered walls and ammo crates. */
+function drawGunFactory(g, pal) {
+  const ML = pal.metalLo, D = pal.dark, MA = pal.main;
+  px(g, -20, 16, 40, 4, "rgba(0,0,0,0.28)");
+
+  // battered (sloped) walls — widen toward the base
+  for (let i = 0; i < 6; i++) { const w = 28 + i * 2; px(g, -Math.round(w / 2), -6 + i * 3, w, 3, i < 2 ? ML : CON); }
+  px(g, -15, -6, 30, 20, CON);
+  px(g, -15, 8, 30, 4, CONL);
+  px(g, -17, -9, 34, 4, D); px(g, -17, -9, 34, 1, STEEL);            // armored roof slab
+
+  // reinforced door
+  px(g, -7, 2, 14, 12, DRK);
+  px(g, -8, 1, 16, 2, MA); px(g, -8, 1, 16, 1, tint(MA, 1.2));
+  px(g, -7, 5, 14, 1, MID); px(g, -7, 9, 14, 1, MID);
+
+  // roof sign + shell emblem
+  px(g, -6, -8, 12, 3, "#0c0d0f");
+  px(g, -5, -7, 8, 1, MA); px(g, -1, -9, 2, 4, MA);
+
+  // ammo crates
+  for (const cx of [-20, 15]) {
+    px(g, cx, 6, 7, 7, "#6b5a3a"); px(g, cx, 6, 7, 1, "#86714a");
+    px(g, cx + 3, 6, 1, 7, "#4a3d28"); px(g, cx, 9, 7, 1, "#4a3d28");
+  }
+  disc(g, -16, 12, 3, CFG.COLORS.wall); disc(g, 16, 12, 3, CFG.COLORS.wall);  // sandbags
+  px(g, -13, -7, 4, 2, STEEL); px(g, 9, -7, 4, 2, STEEL);            // vents
 }

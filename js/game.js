@@ -649,66 +649,45 @@ const G = {
   },
 
   _drawFactories(ctx) {
-    const T = CFG.TILE;
     for (const f of this.factories) {
-      const w = Math.round(T * 2.3), h = Math.round(T * 2.0);
-      const x0 = Math.round(f.x - w / 2), y0 = Math.round(f.y - h / 2);
-      const main = this._teamColor(f.team), dark = this._teamDark(f.team);
+      const palTeam = f.team === TEAM.BLUE ? "blue" : f.team === TEAM.RED ? "red" : "neutral";
+      const img = Sprites.building(f.ftype, palTeam);
+      const bx = Math.round(f.x - img.width / 2), by = Math.round(f.y - img.height / 2 - 4);
+      ctx.drawImage(img, bx, by);
 
-      // ground shadow
-      ctx.fillStyle = "rgba(0,0,0,0.30)"; ctx.fillRect(x0 + 3, y0 + h - 2, w, 4);
+      const cxc = f.x, cyc = f.y - 4;          // sprite centre (matches the -4 anchor)
+      const owned = f.team !== TEAM.NEUTRAL;
+      const producing = owned;
+      const blink = (Math.floor(this.time * 3) % 2) === 0;
 
-      // concrete walls + corrugation
-      ctx.fillStyle = "#3a3d42"; ctx.fillRect(x0, y0, w, h);
-      ctx.fillStyle = "#2c2f33"; ctx.fillRect(x0, y0, w, h);
-      ctx.fillStyle = "#43474d"; for (let i = 2; i < w - 1; i += 4) ctx.fillRect(x0 + i, y0 + 7, 2, h - 9);
-      ctx.fillStyle = "#23262a"; ctx.fillRect(x0, y0 + h - 4, w, 4);     // base shade
-
-      // pitched team-colour roof with stepped (pixel) sawtooth skylights
-      ctx.fillStyle = dark; ctx.fillRect(x0, y0, w, 8);
-      ctx.fillStyle = main;
-      for (let i = 0; i < w - 1; i += 6) {
-        ctx.fillRect(x0 + i, y0 + 5, 6, 2);
-        ctx.fillRect(x0 + i + 1, y0 + 3, 4, 2);
-        ctx.fillRect(x0 + i + 2, y0 + 1, 2, 2);
+      if (owned) {
+        if (f.ftype === "robot") {
+          // rooftop beacon
+          ctx.fillStyle = blink ? "#ff5b5b" : "#5a1414";
+          ctx.fillRect(cxc + 12, cyc - 29, 2, 2);
+        } else if (f.ftype === "vehicle") {
+          // status-light stack (green run / amber / red)
+          const lights = [["#7dff5b", producing && blink], ["#ffd24a", producing && !blink], ["#ff5b5b", !producing]];
+          for (let i = 0; i < 3; i++) { ctx.fillStyle = lights[i][1] ? lights[i][0] : "#1a1a1a"; ctx.fillRect(cxc + 16, cyc - 4 + i * 4, 3, 3); }
+          // chimney smoke while producing
+          for (let i = 0; i < 3; i++) {
+            const t = (this.time * 0.8 + i * 0.34) % 1;
+            PX.fillCircle(ctx, cxc - 18, cyc - 24 - t * 18, 2 + t * 4, `rgba(70,64,58,${0.30 * (1 - t)})`, 2);
+          }
+        } else { // gun: emblem beacon
+          ctx.fillStyle = blink ? "#ffd24a" : "#5a4a14";
+          ctx.fillRect(cxc - 1, cyc - 9, 2, 2);
+        }
       }
-      ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(x0, y0, w, 1);
 
-      // big roller door + emblem sign
-      const dw = w - 12, dx = x0 + 6, dy = y0 + 11;
-      ctx.fillStyle = "#15171a"; ctx.fillRect(dx, dy, dw, h - 15);
-      ctx.fillStyle = "#202327"; for (let yy = dy + 2; yy < dy + h - 15; yy += 3) ctx.fillRect(dx + 1, yy, dw - 2, 1);
-      ctx.fillStyle = dark; ctx.fillRect(dx - 1, dy - 1, dw + 2, 4);     // door header
-      this._factoryGlyph(ctx, f.ftype, f.x, y0 + 5, main);
-
-      // chimneys / type extras
-      if (f.ftype === "gun") { ctx.fillStyle = "#15171a"; ctx.fillRect(f.x - 2, y0 - 5, 4, 6); ctx.fillRect(f.x + 1, y0 - 4, 8, 2); }
-      else if (f.ftype === "robot") { ctx.fillStyle = "#15171a"; ctx.fillRect(x0 + w - 6, y0 - 6, 2, 7); ctx.fillStyle = main; ctx.fillRect(x0 + w - 7, y0 - 7, 4, 2); }
-      else { ctx.fillStyle = "#15171a"; ctx.fillRect(x0 + 3, y0 - 4, 3, 5); ctx.fillRect(x0 + 8, y0 - 4, 3, 5); }
-
-      // build progress bar
-      if (f.team !== TEAM.NEUTRAL) {
+      // build progress bar + hp bar
+      const w = img.width - 12;
+      if (owned) {
         const frac = f.buildFraction();
-        ctx.fillStyle = "#000"; ctx.fillRect(x0, y0 + h + 1, w, 3);
-        ctx.fillStyle = main; ctx.fillRect(x0, y0 + h + 1, w * frac, 3);
+        ctx.fillStyle = "#000"; ctx.fillRect(cxc - w / 2, cyc + 18, w, 3);
+        ctx.fillStyle = this._teamColor(f.team); ctx.fillRect(cxc - w / 2, cyc + 18, w * frac, 3);
       }
-      if (f.hp < f.maxHp) this._bar(ctx, f.x, y0 - 8, w, f.hp / f.maxHp, "#7d7");
-    }
-  },
-
-  // little pictograms on factory signs
-  _factoryGlyph(ctx, type, cx, cy, col) {
-    ctx.fillStyle = "#0c0d0f"; ctx.fillRect(cx - 8, cy - 4, 16, 9);
-    ctx.fillStyle = col;
-    if (type === "robot") {            // robot head
-      ctx.fillRect(cx - 4, cy - 3, 8, 7);
-      ctx.fillStyle = "#0c0d0f"; ctx.fillRect(cx - 2, cy - 1, 1, 2); ctx.fillRect(cx + 1, cy - 1, 1, 2);
-      ctx.fillStyle = col; ctx.fillRect(cx - 1, cy - 5, 2, 2);
-    } else if (type === "vehicle") {   // tank silhouette
-      ctx.fillRect(cx - 6, cy + 1, 11, 3); ctx.fillRect(cx - 3, cy - 2, 6, 3); ctx.fillRect(cx + 2, cy - 1, 5, 2);
-    } else {                            // crosshair
-      PX.ring(ctx, cx, cy, 4, col, 1, 1, 1);
-      ctx.fillRect(cx - 6, cy, 12, 1); ctx.fillRect(cx, cy - 6, 1, 12);
+      if (f.hp < f.maxHp) this._bar(ctx, cxc, cyc - 28, w, f.hp / f.maxHp, "#7d7");
     }
   },
 
