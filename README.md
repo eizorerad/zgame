@@ -41,6 +41,7 @@ Beyond the core blueprint the game models a number of *Z*-style systems:
 | **Terrain & movement** | Sand (normal), **roads** (fast), **scrub** (slow), **cliffs/water** (impassable), **bridges** over water. | `js/config.js` (`TERRAIN_SPEED`), `js/game.js` (`terrainAt`, `_carveRoads`) |
 | **Crushing** | Moving tanks/jeeps flatten enemy infantry they roll over. | `js/entities.js` (`_crush`) |
 | **Repair depots** | Units idling near a friendly fort or factory slowly heal / re-armour. | `js/entities.js` (`_maybeRepair`), `js/game.js` (`nearFriendlyDepot`) |
+| **Contested capture** | Flags are no longer flipped on touch — a unit fills a timed capture meter. Taking an *enemy* sector first neutralizes it (stopping its production) then claims it (~2× cost); both sides on the point freeze it (contested); leaving lets the meter decay. This kills the opening snowball and pushes the decisive fight into the midgame. | `js/config.js` (`CAPTURE_TIME`), `js/sectors.js` (`updateCapture`) |
 | **Minimap** | Live sector ownership + unit blips, top-right. | `js/game.js` (`_drawMinimap`) |
 
 ## Pixel art

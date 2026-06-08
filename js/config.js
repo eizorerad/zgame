@@ -12,7 +12,12 @@ const CFG = {
   SECTOR_SPEED_MULT: 0.18,
 
   // Flag capture happens on contact within this pixel radius
-  FLAG_CAPTURE_RADIUS: 14,
+  FLAG_CAPTURE_RADIUS: 16,
+
+  // Contested capture: seconds for a unit to claim a NEUTRAL flag. Stealing an
+  // enemy flag costs ~2x (neutralize, then claim). Abandoned attempts decay.
+  CAPTURE_TIME: 4.5,
+  CAPTURE_DECAY: 0.6,        // decay speed as a fraction of fill speed
 
   // How wide a unit "sees" for autonomous aggression (pixels)
   DEFAULT_AGGRO: 120,

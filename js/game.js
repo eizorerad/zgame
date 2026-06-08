@@ -360,6 +360,7 @@ const G = {
 
   _update(dt) {
     if (this.over) return;
+    this.dt = dt;
     this.time += dt;
 
     this.commander.update(dt);
@@ -558,6 +559,20 @@ const G = {
       ctx.lineTo(f.x + 1, f.y - 8);
       ctx.closePath(); ctx.fill();
       ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(f.x - 3, f.y + 3, 6, 2);
+
+      // capture meter — an arc filling around the flag base
+      if (s.capProgress > 0 && s.capTeam) {
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "rgba(0,0,0,0.5)";
+        ctx.beginPath(); ctx.arc(f.x, f.y - 2, 8, 0, 7); ctx.stroke();
+        ctx.strokeStyle = s.contested ? "#ffffff" : this._teamColor(s.capTeam);
+        ctx.beginPath();
+        ctx.arc(f.x, f.y - 2, 8, -Math.PI / 2, -Math.PI / 2 + s.capProgress * Math.PI * 2);
+        ctx.stroke();
+        if (s.contested) {           // crossed-swords-ish contested tick
+          ctx.fillStyle = "#fff"; ctx.fillRect(f.x - 1, f.y - 11, 2, 2);
+        }
+      }
     }
   },
 
