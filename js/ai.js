@@ -114,10 +114,9 @@ class Commander {
       if (u.order === "move" && u.moveGoalX != null && !u.target) continue; // already en route
       if (u.target) continue; // currently fighting
 
-      // don't pull a unit off a flag it is actively capturing — let it finish
+      // don't pull an idle unit out of a sector it is busy capturing
       const here = Sectors.sectorAt(u.x, u.y);
-      if (here && here.flag && here.owner !== this.team &&
-          Util.dist(u.x, u.y, here.flag.x, here.flag.y) <= CFG.FLAG_CAPTURE_RADIUS) continue;
+      if (here && here.flag && here.owner !== this.team) continue;
 
       const flag = this._nearestCapturable(u.x, u.y);
       // momentum: most units rush flags, a fraction assaults the fort directly

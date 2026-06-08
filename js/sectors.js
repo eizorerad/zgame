@@ -93,22 +93,20 @@ class Sector {
 }
 
 const Sectors = {
-  /* Each frame: tally which teams hold each flag, then advance its meter. */
+  /* Each frame: tally which teams have any presence inside each sector's
+   * SQUARE (not just on the flag), then advance that sector's capture meter.
+   * Having units anywhere in the square contests/claims it — so a force you
+   * can see in the sector always has a chance to take it. */
   checkCaptures() {
     const dt = G.dt;
-    for (const sec of G.sectors) {
-      if (sec.flash > 0) sec.flash -= dt;
-      const flag = sec.flag;
-      if (!flag) continue;
-      let blue = false, red = false;
-      for (const u of G.units) {
-        if (!u.alive || !u.crewed || u.team === TEAM.NEUTRAL) continue;
-        if (Util.dist(u.x, u.y, flag.x, flag.y) <= CFG.FLAG_CAPTURE_RADIUS) {
-          if (u.team === TEAM.BLUE) blue = true; else red = true;
-        }
-      }
-      sec.updateCapture(blue, red, dt);
+    for (const s of G.sectors) { s._pBlue = false; s._pRed = false; if (s.flash > 0) s.flash -= dt; }
+    for (const u of G.units) {
+      if (!u.alive || !u.crewed || u.team === TEAM.NEUTRAL) continue;
+      const s = Sectors.sectorAt(u.x, u.y);
+      if (!s) continue;
+      if (u.team === TEAM.BLUE) s._pBlue = true; else s._pRed = true;
     }
+    for (const s of G.sectors) if (s.flag) s.updateCapture(s._pBlue, s._pRed, dt);
   },
 
   countOwned(team) {

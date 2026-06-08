@@ -513,8 +513,18 @@ const G = {
       const col = s.owner === TEAM.BLUE ? "77,166,255" : s.owner === TEAM.RED ? "255,91,91" : "150,150,150";
       ctx.fillStyle = `rgba(${col},${s.owner === TEAM.NEUTRAL ? 0.04 : 0.10})`;
       ctx.fillRect(s.px, s.py, s.pw, s.ph);
+      // capture-in-progress: light up the whole square in the attacker's colour
+      if (s.capProgress > 0 && s.capTeam) {
+        const cc = s.contested ? "255,255,255"
+                 : s.capTeam === TEAM.BLUE ? "77,166,255" : "255,91,91";
+        ctx.fillStyle = `rgba(${cc},${0.05 + 0.16 * s.capProgress})`;
+        ctx.fillRect(s.px, s.py, s.pw, s.ph);
+      }
       if (s.flash > 0) { ctx.fillStyle = `rgba(${col},${0.25 * s.flash})`; ctx.fillRect(s.px, s.py, s.pw, s.ph); }
-      ctx.strokeStyle = "rgba(0,0,0,0.55)"; ctx.lineWidth = 2;
+      ctx.strokeStyle = (s.capProgress > 0 && s.capTeam)
+        ? (s.contested ? "rgba(255,255,255,0.7)" : `rgba(${s.capTeam === TEAM.BLUE ? "77,166,255" : "255,91,91"},0.8)`)
+        : "rgba(0,0,0,0.55)";
+      ctx.lineWidth = 2;
       ctx.strokeRect(s.px + 1, s.py + 1, s.pw - 2, s.ph - 2);
     }
 
@@ -579,46 +589,117 @@ const G = {
   _drawFactories(ctx) {
     const T = CFG.TILE;
     for (const f of this.factories) {
-      const x = f.x, y = f.y;
-      const w = T * 1.8, h = T * 1.6;
-      ctx.fillStyle = "#2b2b30"; ctx.fillRect(x - w / 2, y - h / 2, w, h);
-      ctx.fillStyle = this._teamDark(f.team); ctx.fillRect(x - w / 2, y - h / 2, w, 5); // roof
-      // type letter
-      ctx.fillStyle = this._teamColor(f.team);
-      ctx.font = "bold 10px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(f.ftype[0].toUpperCase(), x, y + 1);
-      // build progress
+      const w = Math.round(T * 2.3), h = Math.round(T * 2.0);
+      const x0 = Math.round(f.x - w / 2), y0 = Math.round(f.y - h / 2);
+      const main = this._teamColor(f.team), dark = this._teamDark(f.team);
+
+      // ground shadow
+      ctx.fillStyle = "rgba(0,0,0,0.30)"; ctx.fillRect(x0 + 3, y0 + h - 2, w, 4);
+
+      // concrete walls + corrugation
+      ctx.fillStyle = "#3a3d42"; ctx.fillRect(x0, y0, w, h);
+      ctx.fillStyle = "#2c2f33"; ctx.fillRect(x0, y0, w, h);
+      ctx.fillStyle = "#43474d"; for (let i = 2; i < w - 1; i += 4) ctx.fillRect(x0 + i, y0 + 7, 2, h - 9);
+      ctx.fillStyle = "#23262a"; ctx.fillRect(x0, y0 + h - 4, w, 4);     // base shade
+
+      // pitched team-colour roof with sawtooth skylights
+      ctx.fillStyle = dark; ctx.fillRect(x0, y0, w, 8);
+      ctx.fillStyle = main; for (let i = 0; i < w; i += 6) { ctx.beginPath(); ctx.moveTo(x0 + i, y0 + 7); ctx.lineTo(x0 + i + 3, y0 + 2); ctx.lineTo(x0 + i + 6, y0 + 7); ctx.closePath(); ctx.fill(); }
+      ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(x0, y0, w, 1);
+
+      // big roller door + emblem sign
+      const dw = w - 12, dx = x0 + 6, dy = y0 + 11;
+      ctx.fillStyle = "#15171a"; ctx.fillRect(dx, dy, dw, h - 15);
+      ctx.fillStyle = "#202327"; for (let yy = dy + 2; yy < dy + h - 15; yy += 3) ctx.fillRect(dx + 1, yy, dw - 2, 1);
+      ctx.fillStyle = dark; ctx.fillRect(dx - 1, dy - 1, dw + 2, 4);     // door header
+      this._factoryGlyph(ctx, f.ftype, f.x, y0 + 5, main);
+
+      // chimneys / type extras
+      if (f.ftype === "gun") { ctx.fillStyle = "#15171a"; ctx.fillRect(f.x - 2, y0 - 5, 4, 6); ctx.fillRect(f.x + 1, y0 - 4, 8, 2); }
+      else if (f.ftype === "robot") { ctx.fillStyle = "#15171a"; ctx.fillRect(x0 + w - 6, y0 - 6, 2, 7); ctx.fillStyle = main; ctx.fillRect(x0 + w - 7, y0 - 7, 4, 2); }
+      else { ctx.fillStyle = "#15171a"; ctx.fillRect(x0 + 3, y0 - 4, 3, 5); ctx.fillRect(x0 + 8, y0 - 4, 3, 5); }
+
+      // build progress bar
       if (f.team !== TEAM.NEUTRAL) {
         const frac = f.buildFraction();
-        ctx.fillStyle = "#000"; ctx.fillRect(x - w / 2, y + h / 2 + 1, w, 3);
-        ctx.fillStyle = this._teamColor(f.team); ctx.fillRect(x - w / 2, y + h / 2 + 1, w * frac, 3);
+        ctx.fillStyle = "#000"; ctx.fillRect(x0, y0 + h + 1, w, 3);
+        ctx.fillStyle = main; ctx.fillRect(x0, y0 + h + 1, w * frac, 3);
       }
-      // hp bar if damaged
-      if (f.hp < f.maxHp) this._bar(ctx, x, y - h / 2 - 4, w, f.hp / f.maxHp, "#7d7");
+      if (f.hp < f.maxHp) this._bar(ctx, f.x, y0 - 8, w, f.hp / f.maxHp, "#7d7");
+    }
+  },
+
+  // little pictograms on factory signs
+  _factoryGlyph(ctx, type, cx, cy, col) {
+    ctx.fillStyle = "#0c0d0f"; ctx.fillRect(cx - 8, cy - 4, 16, 9);
+    ctx.fillStyle = col;
+    if (type === "robot") {            // robot head
+      ctx.fillRect(cx - 4, cy - 3, 8, 7);
+      ctx.fillStyle = "#0c0d0f"; ctx.fillRect(cx - 2, cy - 1, 1, 2); ctx.fillRect(cx + 1, cy - 1, 1, 2);
+      ctx.fillStyle = col; ctx.fillRect(cx - 1, cy - 5, 2, 2);
+    } else if (type === "vehicle") {   // tank silhouette
+      ctx.fillRect(cx - 6, cy + 1, 11, 3); ctx.fillRect(cx - 3, cy - 2, 6, 3); ctx.fillRect(cx + 2, cy - 1, 5, 2);
+    } else {                            // crosshair
+      ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 7); ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke();
+      ctx.fillRect(cx - 6, cy - 0.5, 12, 1); ctx.fillRect(cx - 0.5, cy - 6, 1, 12);
     }
   },
 
   _drawForts(ctx) {
     for (const f of this.forts) {
-      if (!f.alive) {
-        ctx.fillStyle = "#222"; ctx.fillRect(f.x - f.w / 2, f.y - f.h / 2, f.w, f.h);
+      const x = Math.round(f.x - f.w / 2), y = Math.round(f.y - f.h / 2);
+      const W = f.w, H = f.h, main = this._teamColor(f.team), dark = this._teamDark(f.team);
+
+      if (!f.alive) {                                  // rubble
+        ctx.fillStyle = "#2a2622"; ctx.fillRect(x, y, W, H);
+        ctx.fillStyle = "#1a1714";
+        for (let i = 0; i < 26; i++) ctx.fillRect(x + (i * 13 % (W - 4)), y + (i * 7 % (H - 4)), 4, 3);
         continue;
       }
-      const x = f.x - f.w / 2, y = f.y - f.h / 2;
-      ctx.fillStyle = this._teamDark(f.team); ctx.fillRect(x, y, f.w, f.h);
-      ctx.fillStyle = "#1c1c1c"; ctx.fillRect(x + 4, y + 4, f.w - 8, f.h - 8);
-      // battlements
-      ctx.fillStyle = this._teamDark(f.team);
-      for (let bx = x; bx < x + f.w; bx += 8) ctx.fillRect(bx, y - 3, 5, 4);
-      // entry marker
-      ctx.fillStyle = this._teamColor(f.team);
-      ctx.fillRect(Util.cx(f.entry.x) - 5, Util.cy(f.entry.y) - 5, 10, 10);
-      ctx.fillStyle = "#000"; ctx.font = "8px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText("▼", Util.cx(f.entry.x), Util.cy(f.entry.y));
-      // turret nub
-      ctx.fillStyle = "#111"; ctx.beginPath(); ctx.arc(f.x, f.y, 5, 0, 7); ctx.fill();
-      // hp bar
-      this._bar(ctx, f.x, y - 8, f.w, f.hp / f.maxHp, this._teamColor(f.team));
+
+      ctx.fillStyle = "rgba(0,0,0,0.35)"; ctx.fillRect(x + 3, y + H - 1, W, 5);  // shadow
+
+      // courtyard floor
+      ctx.fillStyle = "#26211b"; ctx.fillRect(x, y, W, H);
+      ctx.strokeStyle = "rgba(255,255,255,0.04)"; ctx.lineWidth = 1;
+      for (let gx = x + 8; gx < x + W; gx += 8) { ctx.beginPath(); ctx.moveTo(gx, y); ctx.lineTo(gx, y + H); ctx.stroke(); }
+
+      // perimeter wall
+      const t = 6;
+      ctx.fillStyle = dark;
+      ctx.fillRect(x, y, W, t); ctx.fillRect(x, y + H - t, W, t);
+      ctx.fillRect(x, y, t, H); ctx.fillRect(x + W - t, y, t, H);
+      ctx.fillStyle = "rgba(255,255,255,0.12)"; ctx.fillRect(x, y, W, 1);
+      // battlement crenellations on top wall
+      ctx.fillStyle = dark; for (let bx = x; bx < x + W; bx += 7) ctx.fillRect(bx, y - 3, 4, 4);
+
+      // gate opening at the entry tile (knock a hole in the wall there)
+      const ex = Util.cx(f.entry.x), ey = Util.cy(f.entry.y);
+      ctx.fillStyle = "#26211b";
+      ctx.fillRect(ex - 7, Math.abs(ey - y) < H / 2 ? y - 1 : y, 14, t + 2);     // clear top-wall section near entry
+      ctx.fillStyle = main; ctx.fillRect(ex - 7, y - 1, 14, 2);                   // gate lintel
+      ctx.fillStyle = "#0c0d0f"; ctx.fillRect(ex - 6, y, 12, t);                  // dark gateway
+      ctx.fillStyle = main;                                                       // entry chevron
+      ctx.beginPath(); ctx.moveTo(ex - 4, ey - 4); ctx.lineTo(ex + 4, ey - 4); ctx.lineTo(ex, ey + 1); ctx.closePath(); ctx.fill();
+
+      // corner turrets
+      for (const [cxp, cyp] of [[x + t, y + t], [x + W - t, y + t], [x + t, y + H - t], [x + W - t, y + H - t]]) {
+        ctx.fillStyle = "#15171a"; ctx.beginPath(); ctx.arc(cxp, cyp, 4.5, 0, 7); ctx.fill();
+        ctx.fillStyle = main; ctx.beginPath(); ctx.arc(cxp, cyp, 2.5, 0, 7); ctx.fill();
+      }
+
+      // central command keep with rotating main gun
+      ctx.fillStyle = "#1b1d20"; ctx.fillRect(f.x - 11, f.y - 9, 22, 18);
+      ctx.fillStyle = dark; ctx.fillRect(f.x - 11, f.y - 9, 22, 5);
+      ctx.fillStyle = main; ctx.fillRect(f.x - 3, f.y - 8, 6, 3);                 // emblem
+      const foe = this.nearestEnemyUnit(f.x, f.y, f.team, CFG.FORT_TURRET_RANGE * 2);
+      const ang = foe ? Math.atan2(foe.y - f.y, foe.x - f.x) : 0;
+      ctx.fillStyle = "#0c0d0f"; ctx.beginPath(); ctx.arc(f.x, f.y, 6, 0, 7); ctx.fill();
+      ctx.fillStyle = main; ctx.beginPath(); ctx.arc(f.x, f.y, 4, 0, 7); ctx.fill();
+      ctx.strokeStyle = "#0c0d0f"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.x + Math.cos(ang) * 12, f.y + Math.sin(ang) * 12); ctx.stroke();
+
+      this._bar(ctx, f.x, y - 8, W, f.hp / f.maxHp, main);
     }
   },
 
