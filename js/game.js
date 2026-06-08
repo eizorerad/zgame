@@ -663,15 +663,15 @@ const G = {
       if (owned) {
         if (f.ftype === "robot") {
           ctx.fillStyle = blink ? "#ff5b5b" : "#5a1414";            // antenna beacon
-          ctx.fillRect(cxc + 12, cyc - 29, 2, 2);
+          ctx.fillRect(cxc + 13, cyc - 31, 2, 2);
         } else if (f.ftype === "vehicle") {
           // status-light stack on the front face (green run / amber / red)
           const lights = [["#7dff5b", producing && blink], ["#ffd24a", producing && !blink], ["#ff5b5b", !producing]];
-          for (let i = 0; i < 3; i++) { ctx.fillStyle = lights[i][1] ? lights[i][0] : "#1a1a1a"; ctx.fillRect(cxc + 17, cyc + 1 + i * 3, 2, 2); }
+          for (let i = 0; i < 3; i++) { ctx.fillStyle = lights[i][1] ? lights[i][0] : "#1a1a1a"; ctx.fillRect(cxc + 16, cyc + 1 + i * 3, 2, 2); }
           // chimney smoke while producing
           for (let i = 0; i < 3; i++) {
             const t = (this.time * 0.8 + i * 0.34) % 1;
-            PX.fillCircle(ctx, cxc - 18, cyc - 31 - t * 18, 2 + t * 4, `rgba(70,64,58,${0.30 * (1 - t)})`, 2);
+            PX.fillCircle(ctx, cxc - 18, cyc - 33 - t * 18, 2 + t * 4, `rgba(70,64,58,${0.30 * (1 - t)})`, 2);
           }
         } else { // gun: rooftop hatch beacon
           ctx.fillStyle = blink ? "#ffd24a" : "#5a4a14";
@@ -679,14 +679,20 @@ const G = {
         }
       }
 
-      // build progress bar + hp bar
-      const w = img.width - 18;
+      // green digital countdown (like Z) + thin progress bar + hp bar
       if (owned) {
-        const frac = f.buildFraction();
-        ctx.fillStyle = "#000"; ctx.fillRect(cxc - w / 2, cyc + 14, w, 3);
-        ctx.fillStyle = this._teamColor(f.team); ctx.fillRect(cxc - w / 2, cyc + 14, w * frac, 3);
+        const base = f.spec.table[f.queueKey].baseTime;
+        const remain = Math.max(0, this.actualBuildTime(base, f.team) - f.progress);
+        const txt = Util.fmtTime(remain);
+        let tw = 0; for (const ch of txt) tw += (PXFONT[ch] || PXFONT[" "])[0].length + 1; tw -= 1;
+        ctx.fillStyle = "#0a120a"; ctx.fillRect(cxc - tw / 2 - 1, cyc + 13, tw + 2, 7);
+        ctx.fillStyle = "#1d381d"; ctx.fillRect(cxc - tw / 2 - 1, cyc + 13, tw + 2, 1);
+        this._drawDigits(ctx, Math.round(cxc - tw / 2), cyc + 14, txt, blink ? "#86ff84" : "#56d65a");
+        const w = img.width - 22, frac = f.buildFraction();
+        ctx.fillStyle = "#000"; ctx.fillRect(cxc - w / 2, cyc + 21, w, 2);
+        ctx.fillStyle = this._teamColor(f.team); ctx.fillRect(cxc - w / 2, cyc + 21, w * frac, 2);
       }
-      if (f.hp < f.maxHp) this._bar(ctx, cxc, cyc - 31, w, f.hp / f.maxHp, "#7d7");
+      if (f.hp < f.maxHp) this._bar(ctx, cxc, cyc - 34, img.width - 22, f.hp / f.maxHp, "#7d7");
     }
   },
 
@@ -821,6 +827,18 @@ const G = {
     ctx.fillStyle = col; ctx.fillRect(cx - w / 2, y, w * frac, 3);
   },
 
+  // tiny 3x5 pixel font for the factory countdown readouts
+  _drawDigits(ctx, x, y, text, color) {
+    ctx.fillStyle = color;
+    let cx = x;
+    for (const ch of text) {
+      const rows = PXFONT[ch] || PXFONT[" "];
+      const w = rows[0].length;
+      for (let r = 0; r < 5; r++) for (let c = 0; c < w; c++) if (rows[r][c] === "1") ctx.fillRect(cx + c, y + r, 1, 1);
+      cx += w + 1;
+    }
+  },
+
   _drawProjectiles(ctx) {
     for (const p of this.projectiles) {
       if (p.sniper) {
@@ -915,6 +933,22 @@ const G = {
     ctx.strokeRect(x + 0.5, y + 0.5, w, h);
     ctx.fillStyle = "rgba(156,255,106,0.08)"; ctx.fillRect(x, y, w, h);
   },
+};
+
+// 3x5 pixel digits for factory countdown displays
+const PXFONT = {
+  "0": ["111", "101", "101", "101", "111"],
+  "1": ["010", "110", "010", "010", "111"],
+  "2": ["111", "001", "111", "100", "111"],
+  "3": ["111", "001", "111", "001", "111"],
+  "4": ["101", "101", "111", "001", "001"],
+  "5": ["111", "100", "111", "001", "111"],
+  "6": ["111", "100", "111", "101", "111"],
+  "7": ["111", "001", "001", "010", "010"],
+  "8": ["111", "101", "111", "101", "111"],
+  "9": ["111", "101", "111", "001", "111"],
+  ":": ["0", "0", "1", "0", "1"],
+  " ": ["00", "00", "00", "00", "00"],
 };
 
 window.addEventListener("load", () => G.init());
