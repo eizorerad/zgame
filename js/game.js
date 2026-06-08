@@ -662,32 +662,31 @@ const G = {
 
       if (owned) {
         if (f.ftype === "robot") {
-          // rooftop beacon
-          ctx.fillStyle = blink ? "#ff5b5b" : "#5a1414";
+          ctx.fillStyle = blink ? "#ff5b5b" : "#5a1414";            // antenna beacon
           ctx.fillRect(cxc + 12, cyc - 29, 2, 2);
         } else if (f.ftype === "vehicle") {
-          // status-light stack (green run / amber / red)
+          // status-light stack on the front face (green run / amber / red)
           const lights = [["#7dff5b", producing && blink], ["#ffd24a", producing && !blink], ["#ff5b5b", !producing]];
-          for (let i = 0; i < 3; i++) { ctx.fillStyle = lights[i][1] ? lights[i][0] : "#1a1a1a"; ctx.fillRect(cxc + 16, cyc - 4 + i * 4, 3, 3); }
+          for (let i = 0; i < 3; i++) { ctx.fillStyle = lights[i][1] ? lights[i][0] : "#1a1a1a"; ctx.fillRect(cxc + 17, cyc + 1 + i * 3, 2, 2); }
           // chimney smoke while producing
           for (let i = 0; i < 3; i++) {
             const t = (this.time * 0.8 + i * 0.34) % 1;
-            PX.fillCircle(ctx, cxc - 18, cyc - 24 - t * 18, 2 + t * 4, `rgba(70,64,58,${0.30 * (1 - t)})`, 2);
+            PX.fillCircle(ctx, cxc - 18, cyc - 31 - t * 18, 2 + t * 4, `rgba(70,64,58,${0.30 * (1 - t)})`, 2);
           }
-        } else { // gun: emblem beacon
+        } else { // gun: rooftop hatch beacon
           ctx.fillStyle = blink ? "#ffd24a" : "#5a4a14";
           ctx.fillRect(cxc - 1, cyc - 9, 2, 2);
         }
       }
 
       // build progress bar + hp bar
-      const w = img.width - 12;
+      const w = img.width - 18;
       if (owned) {
         const frac = f.buildFraction();
-        ctx.fillStyle = "#000"; ctx.fillRect(cxc - w / 2, cyc + 18, w, 3);
-        ctx.fillStyle = this._teamColor(f.team); ctx.fillRect(cxc - w / 2, cyc + 18, w * frac, 3);
+        ctx.fillStyle = "#000"; ctx.fillRect(cxc - w / 2, cyc + 14, w, 3);
+        ctx.fillStyle = this._teamColor(f.team); ctx.fillRect(cxc - w / 2, cyc + 14, w * frac, 3);
       }
-      if (f.hp < f.maxHp) this._bar(ctx, cxc, cyc - 28, w, f.hp / f.maxHp, "#7d7");
+      if (f.hp < f.maxHp) this._bar(ctx, cxc, cyc - 31, w, f.hp / f.maxHp, "#7d7");
     }
   },
 
