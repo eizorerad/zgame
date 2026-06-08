@@ -559,8 +559,7 @@ const G = {
   _drawScorch(ctx) {
     for (const s of this.scorch) {
       const a = 0.42 * (1 - s.t / s.life);
-      ctx.fillStyle = `rgba(18,12,8,${a})`;
-      ctx.beginPath(); ctx.ellipse(s.x, s.y, s.r, s.r * 0.62, 0, 0, 7); ctx.fill();
+      PX.fillOval(ctx, s.x, s.y, s.r, s.r * 0.62, `rgba(18,12,8,${a})`, 2);
     }
   },
 
@@ -575,26 +574,18 @@ const G = {
     for (const s of this.sectors) {
       const f = s.flag; if (!f) continue;
       ctx.fillStyle = "#2a2a2a"; ctx.fillRect(f.x - 1, f.y - 14, 2, 18);   // pole
+      // stepped pennant (pixel triangle)
       ctx.fillStyle = this._teamColor(s.owner);
-      ctx.beginPath();
-      ctx.moveTo(f.x + 1, f.y - 14);
-      ctx.lineTo(f.x + 12, f.y - 11);
-      ctx.lineTo(f.x + 1, f.y - 8);
-      ctx.closePath(); ctx.fill();
+      ctx.fillRect(f.x + 1, f.y - 14, 11, 2);
+      ctx.fillRect(f.x + 1, f.y - 12, 8, 2);
+      ctx.fillRect(f.x + 1, f.y - 10, 5, 2);
       ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fillRect(f.x - 3, f.y + 3, 6, 2);
 
-      // capture meter — an arc filling around the flag base
+      // capture meter — a pixel ring that fills clockwise from the top
       if (s.capProgress > 0 && s.capTeam) {
-        ctx.lineWidth = 2.5;
-        ctx.strokeStyle = "rgba(0,0,0,0.5)";
-        ctx.beginPath(); ctx.arc(f.x, f.y - 2, 8, 0, 7); ctx.stroke();
-        ctx.strokeStyle = s.contested ? "#ffffff" : this._teamColor(s.capTeam);
-        ctx.beginPath();
-        ctx.arc(f.x, f.y - 2, 8, -Math.PI / 2, -Math.PI / 2 + s.capProgress * Math.PI * 2);
-        ctx.stroke();
-        if (s.contested) {           // crossed-swords-ish contested tick
-          ctx.fillStyle = "#fff"; ctx.fillRect(f.x - 1, f.y - 11, 2, 2);
-        }
+        PX.ring(ctx, f.x, f.y - 2, 9, "rgba(0,0,0,0.5)", 2, 4, 1);
+        PX.ring(ctx, f.x, f.y - 2, 9, s.contested ? "#ffffff" : this._teamColor(s.capTeam), 2, 4, s.capProgress);
+        if (s.contested) { ctx.fillStyle = "#fff"; ctx.fillRect(f.x - 1, f.y - 12, 2, 2); }
       }
     }
   },
@@ -615,9 +606,14 @@ const G = {
       ctx.fillStyle = "#43474d"; for (let i = 2; i < w - 1; i += 4) ctx.fillRect(x0 + i, y0 + 7, 2, h - 9);
       ctx.fillStyle = "#23262a"; ctx.fillRect(x0, y0 + h - 4, w, 4);     // base shade
 
-      // pitched team-colour roof with sawtooth skylights
+      // pitched team-colour roof with stepped (pixel) sawtooth skylights
       ctx.fillStyle = dark; ctx.fillRect(x0, y0, w, 8);
-      ctx.fillStyle = main; for (let i = 0; i < w; i += 6) { ctx.beginPath(); ctx.moveTo(x0 + i, y0 + 7); ctx.lineTo(x0 + i + 3, y0 + 2); ctx.lineTo(x0 + i + 6, y0 + 7); ctx.closePath(); ctx.fill(); }
+      ctx.fillStyle = main;
+      for (let i = 0; i < w - 1; i += 6) {
+        ctx.fillRect(x0 + i, y0 + 5, 6, 2);
+        ctx.fillRect(x0 + i + 1, y0 + 3, 4, 2);
+        ctx.fillRect(x0 + i + 2, y0 + 1, 2, 2);
+      }
       ctx.fillStyle = "rgba(255,255,255,0.25)"; ctx.fillRect(x0, y0, w, 1);
 
       // big roller door + emblem sign
@@ -653,8 +649,8 @@ const G = {
     } else if (type === "vehicle") {   // tank silhouette
       ctx.fillRect(cx - 6, cy + 1, 11, 3); ctx.fillRect(cx - 3, cy - 2, 6, 3); ctx.fillRect(cx + 2, cy - 1, 5, 2);
     } else {                            // crosshair
-      ctx.beginPath(); ctx.arc(cx, cy, 4, 0, 7); ctx.lineWidth = 1.5; ctx.strokeStyle = col; ctx.stroke();
-      ctx.fillRect(cx - 6, cy - 0.5, 12, 1); ctx.fillRect(cx - 0.5, cy - 6, 1, 12);
+      PX.ring(ctx, cx, cy, 4, col, 1, 1, 1);
+      ctx.fillRect(cx - 6, cy, 12, 1); ctx.fillRect(cx, cy - 6, 1, 12);
     }
   },
 
@@ -674,8 +670,8 @@ const G = {
 
       // courtyard floor
       ctx.fillStyle = "#26211b"; ctx.fillRect(x, y, W, H);
-      ctx.strokeStyle = "rgba(255,255,255,0.04)"; ctx.lineWidth = 1;
-      for (let gx = x + 8; gx < x + W; gx += 8) { ctx.beginPath(); ctx.moveTo(gx, y); ctx.lineTo(gx, y + H); ctx.stroke(); }
+      ctx.fillStyle = "rgba(255,255,255,0.04)";
+      for (let gx = x + 8; gx < x + W; gx += 8) ctx.fillRect(gx, y, 1, H);
 
       // perimeter wall
       const t = 6;
@@ -692,13 +688,13 @@ const G = {
       ctx.fillRect(ex - 7, Math.abs(ey - y) < H / 2 ? y - 1 : y, 14, t + 2);     // clear top-wall section near entry
       ctx.fillStyle = main; ctx.fillRect(ex - 7, y - 1, 14, 2);                   // gate lintel
       ctx.fillStyle = "#0c0d0f"; ctx.fillRect(ex - 6, y, 12, t);                  // dark gateway
-      ctx.fillStyle = main;                                                       // entry chevron
-      ctx.beginPath(); ctx.moveTo(ex - 4, ey - 4); ctx.lineTo(ex + 4, ey - 4); ctx.lineTo(ex, ey + 1); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = main;                                                       // entry chevron (pixel)
+      ctx.fillRect(ex - 4, ey - 4, 8, 2); ctx.fillRect(ex - 2, ey - 2, 4, 2); ctx.fillRect(ex - 1, ey, 2, 2);
 
       // corner turrets
       for (const [cxp, cyp] of [[x + t, y + t], [x + W - t, y + t], [x + t, y + H - t], [x + W - t, y + H - t]]) {
-        ctx.fillStyle = "#15171a"; ctx.beginPath(); ctx.arc(cxp, cyp, 4.5, 0, 7); ctx.fill();
-        ctx.fillStyle = main; ctx.beginPath(); ctx.arc(cxp, cyp, 2.5, 0, 7); ctx.fill();
+        PX.fillCircle(ctx, cxp, cyp, 4.5, "#15171a", 2);
+        PX.fillCircle(ctx, cxp, cyp, 2.5, main, 2);
       }
 
       // central command keep with rotating main gun
@@ -707,10 +703,9 @@ const G = {
       ctx.fillStyle = main; ctx.fillRect(f.x - 3, f.y - 8, 6, 3);                 // emblem
       const foe = this.nearestEnemyUnit(f.x, f.y, f.team, CFG.FORT_TURRET_RANGE * 2);
       const ang = foe ? Math.atan2(foe.y - f.y, foe.x - f.x) : 0;
-      ctx.fillStyle = "#0c0d0f"; ctx.beginPath(); ctx.arc(f.x, f.y, 6, 0, 7); ctx.fill();
-      ctx.fillStyle = main; ctx.beginPath(); ctx.arc(f.x, f.y, 4, 0, 7); ctx.fill();
-      ctx.strokeStyle = "#0c0d0f"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(f.x + Math.cos(ang) * 12, f.y + Math.sin(ang) * 12); ctx.stroke();
+      PX.line(ctx, f.x, f.y, f.x + Math.cos(ang) * 12, f.y + Math.sin(ang) * 12, "#0c0d0f", 2, 3);
+      PX.fillCircle(ctx, f.x, f.y, 6, "#0c0d0f", 2);
+      PX.fillCircle(ctx, f.x, f.y, 4, main, 2);
 
       this._bar(ctx, f.x, y - 8, W, f.hp / f.maxHp, main);
     }
@@ -727,9 +722,8 @@ const G = {
     for (const u of this.units) {
       const palTeam = u.team === TEAM.BLUE ? "blue" : u.team === TEAM.RED ? "red" : "neutral";
 
-      // soft shadow
-      ctx.fillStyle = "rgba(0,0,0,0.28)";
-      ctx.beginPath(); ctx.ellipse(u.x, u.y + u.radius * 0.55, u.radius * 0.95, u.radius * 0.5, 0, 0, 7); ctx.fill();
+      // soft shadow (pixel oval)
+      PX.fillOval(ctx, u.x, u.y + u.radius * 0.55, u.radius * 0.95, u.radius * 0.5, "rgba(0,0,0,0.28)", 2);
 
       if (u.kind === "machine") {
         const aim = this._dirOf(u.target ? u.facing : u.hullFacing);
@@ -752,14 +746,8 @@ const G = {
         ctx.fillStyle = u.rank >= 3 ? "#ffe24a" : "#e8e8e8";
         for (let i = 0; i < u.rank; i++) ctx.fillRect(u.x - 3 + i * 3, u.y + u.radius + 3, 2, 2);
       }
-      if (u.selected) {
-        ctx.strokeStyle = "#9cff6a"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(u.x, u.y, u.radius + 5, 0, 7); ctx.stroke();
-      }
-      if (u.holdPosition) {
-        ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
-        ctx.beginPath(); ctx.arc(u.x, u.y, u.radius + 7, 0, 7); ctx.stroke(); ctx.setLineDash([]);
-      }
+      if (u.selected) PX.brackets(ctx, u.x, u.y, u.radius + 5, "#9cff6a", 4, 2);
+      if (u.holdPosition) PX.ring(ctx, u.x, u.y, u.radius + 7, "rgba(255,255,255,0.45)", 2, 2, 1);
     }
   },
 
@@ -800,36 +788,31 @@ const G = {
   _drawProjectiles(ctx) {
     for (const p of this.projectiles) {
       if (p.sniper) {
-        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(p.x, p.y);
-        ctx.lineTo(p.x - (p.tx - p.x) * 0.04, p.y - (p.ty - p.y) * 0.04); ctx.stroke();
+        PX.line(ctx, p.x, p.y, p.x - (p.tx - p.x) * 0.05, p.y - (p.ty - p.y) * 0.05, "#fff", 2, 2);
       } else {
         ctx.fillStyle = p.team === TEAM.BLUE ? "#bfe0ff" : p.team === TEAM.RED ? "#ffd0d0" : "#ffe";
-        ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+        ctx.fillRect(Math.floor(p.x / 2) * 2, Math.floor(p.y / 2) * 2, 2, 2);
       }
     }
   },
 
   _drawExplosion(ctx, e) {
-    // smoke (drawn first, behind the fire)
+    // smoke (drawn first, behind the fire) — pixel puffs
     for (const s of e.smoke) {
       const st = e.t - s.delay; if (st < 0) continue;
       const p = st / s.life; if (p > 1) continue;
-      const r = s.r * (0.6 + p * 1.8);
-      ctx.fillStyle = `rgba(70,64,58,${0.34 * (1 - p)})`;
-      ctx.beginPath(); ctx.arc(e.x + s.ox, e.y - st * s.rise, r, 0, 7); ctx.fill();
-      ctx.fillStyle = `rgba(110,100,90,${0.20 * (1 - p)})`;
-      ctx.beginPath(); ctx.arc(e.x + s.ox, e.y - st * s.rise, r * 0.6, 0, 7); ctx.fill();
+      const r = s.r * (0.6 + p * 1.8), sy = e.y - st * s.rise;
+      PX.fillCircle(ctx, e.x + s.ox, sy, r, `rgba(70,64,58,${0.34 * (1 - p)})`, 2);
+      PX.fillCircle(ctx, e.x + s.ox, sy, r * 0.6, `rgba(110,100,90,${0.20 * (1 - p)})`, 2);
     }
 
     // shockwave ring for big blasts
     if (e.shock && e.t < 0.18) {
       const p = e.t / 0.18;
-      ctx.strokeStyle = `rgba(255,230,170,${0.6 * (1 - p)})`; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.arc(e.x, e.y, e.size * (0.6 + p * 1.6), 0, 7); ctx.stroke();
+      PX.ring(ctx, e.x, e.y, e.size * (0.6 + p * 1.6), `rgba(255,230,170,${0.6 * (1 - p)})`, 2, 2, 1);
     }
 
-    // fireball — lumpy, white-hot core fading through orange
+    // fireball — lumpy, white-hot core fading through orange (pixel blocks)
     for (const pf of e.puffs) {
       const pt = e.t - pf.delay; if (pt < 0) continue;
       const p = pt / e.fbDur; if (p > 1) continue;
@@ -838,27 +821,22 @@ const G = {
       if (p < 0.3) col = `rgba(255,255,235,${a})`;
       else if (p < 0.6) col = `rgba(255,205,70,${a})`;
       else col = `rgba(225,95,28,${a})`;
-      ctx.fillStyle = col;
-      ctx.beginPath(); ctx.arc(e.x + pf.ox, e.y + pf.oy, r, 0, 7); ctx.fill();
+      PX.fillCircle(ctx, e.x + pf.ox, e.y + pf.oy, r, col, 2);
     }
 
-    // flying debris (metal chunks + embers), with little shadows
+    // flying debris (metal chunks + embers), snapped to the pixel grid
     for (const d of e.debris) {
       if (d.t >= d.life) continue;
       const a = 1 - d.t / d.life;
-      const px = e.x + d.x, py = e.y + d.y;
+      const bx = Math.floor((e.x + d.x) / 2) * 2, by = Math.floor((e.y + d.y) / 2) * 2;
       ctx.fillStyle = `rgba(0,0,0,${0.25 * a})`;
-      ctx.fillRect(px - d.s / 2, e.y + Math.max(0, d.y) + 1, d.s, 1);   // ground shadow
+      ctx.fillRect(bx, Math.floor((e.y + Math.max(0, d.y)) / 2) * 2 + 2, 2, 2);  // ground shadow
       if (d.hot) {
-        ctx.fillStyle = `rgba(255,${120 + ((a * 120) | 0)},40,${a})`;
-        ctx.beginPath(); ctx.arc(px, py, d.s * 0.7, 0, 7); ctx.fill();
-        ctx.fillStyle = `rgba(255,240,180,${a * 0.8})`;
-        ctx.fillRect(px - 0.5, py - 0.5, 1, 1);
+        PX.fillCircle(ctx, bx, by, d.s * 0.8 + 1, `rgba(255,${120 + ((a * 120) | 0)},40,${a})`, 2);
+        ctx.fillStyle = `rgba(255,240,180,${a * 0.9})`; ctx.fillRect(bx, by, 2, 2);
       } else {
-        ctx.save(); ctx.translate(px, py); ctx.rotate(d.rot);
-        ctx.fillStyle = d.c; ctx.globalAlpha = a;
-        ctx.fillRect(-d.s / 2, -d.s / 2, d.s, d.s);
-        ctx.globalAlpha = 1; ctx.restore();
+        const sz = Math.max(2, Math.round(d.s / 2) * 2);
+        ctx.fillStyle = d.c; ctx.globalAlpha = a; ctx.fillRect(bx, by, sz, sz); ctx.globalAlpha = 1;
       }
     }
   },
@@ -868,23 +846,19 @@ const G = {
       if (e instanceof Explosion) {
         this._drawExplosion(ctx, e);
       } else if (e instanceof Spark) {
-        ctx.fillStyle = e.c; ctx.fillRect(e.x - 2, e.y - 2, 4, 4);
+        ctx.fillStyle = e.c; ctx.fillRect(Math.floor(e.x / 2) * 2 - 2, Math.floor(e.y / 2) * 2 - 2, 4, 4);
       } else if (e instanceof Tracer) {
-        ctx.strokeStyle = this._teamColor(e.team); ctx.lineWidth = 1.2;
         ctx.globalAlpha = 1 - e.t / e.life;
-        ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
+        PX.line(ctx, e.x1, e.y1, e.x2, e.y2, this._teamColor(e.team), 2, 2);
         ctx.globalAlpha = 1;
       } else if (e instanceof Muzzle) {
         const a = 1 - e.t / e.life;
-        ctx.fillStyle = `rgba(255,230,140,${a})`;
-        ctx.beginPath(); ctx.arc(e.x, e.y, 3 * a + 1, 0, 7); ctx.fill();
-        ctx.fillStyle = `rgba(255,255,255,${a})`;
-        ctx.fillRect(e.x - 1, e.y - 1, 2, 2);
+        PX.fillCircle(ctx, e.x, e.y, 3 * a + 1, `rgba(255,230,140,${a})`, 2);
+        ctx.fillStyle = `rgba(255,255,255,${a})`; ctx.fillRect(Math.floor(e.x / 2) * 2, Math.floor(e.y / 2) * 2, 2, 2);
       } else if (e instanceof RankUp) {
-        const a = 1 - e.t / e.life;
+        const a = 1 - e.t / e.life;                       // pixel up-chevron
         ctx.fillStyle = `rgba(255,226,74,${a})`;
-        ctx.font = "9px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText("▲", e.x, e.y);
+        ctx.fillRect(e.x - 3, e.y, 6, 2); ctx.fillRect(e.x - 2, e.y - 2, 4, 2); ctx.fillRect(e.x - 1, e.y - 4, 2, 2);
       }
     }
   },

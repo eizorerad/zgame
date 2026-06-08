@@ -82,7 +82,8 @@ function bakeStaticFrame(size, drawFn, f) {
 
 // pixel helper (coords are relative to the already-translated centre)
 function px(g, x, y, w, h, c) { g.fillStyle = c; g.fillRect(Math.round(x), Math.round(y), w, h); }
-function disc(g, x, y, r, c) { g.fillStyle = c; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+// crisp pixel disc (no anti-aliasing) — sprites use a 1px lattice for detail
+function disc(g, x, y, r, c) { PX.fillCircle(g, x, y, r, c, 1); }
 
 /* =========================================================================
  * INFANTRY  (facing east — weapon points +x)
