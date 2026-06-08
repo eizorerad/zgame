@@ -119,13 +119,13 @@ class Commander {
       if (here && here.flag && here.owner !== this.team) continue;
 
       const flag = this._nearestCapturable(u.x, u.y);
-      // momentum: most units rush flags, a fraction assaults the fort directly
+      // momentum: most units rush flags (plain move, so they hold the point),
+      // a fraction assaults the fort with an aggressive attack-move
       if (flag && (Util.chance(0.7) || !enemyFort)) {
         u.orderMove(flag.x, flag.y);
       } else if (enemyFort) {
-        // aim a unit at the fort entry tile — infiltration is a win!
         const ex = Util.cx(enemyFort.entry.x), ey = Util.cy(enemyFort.entry.y);
-        u.orderMove(ex, ey);
+        u.orderAttackMove(ex, ey);
       }
     }
   }

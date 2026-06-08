@@ -137,3 +137,7 @@ button:active { transform: translate(2px, 2px); box-shadow: none; }
 
 #help { color: #5a6b62; font-size: 11px; line-height: 1.5; }
 #help strong { color: #8fa89a; }
+#help .c-move { color: #9cff6a; font-weight: bold; }
+#help .c-atk { color: #ff5b5b; font-weight: bold; }
+#help .c-cap { color: #ffe24a; font-weight: bold; }
+#help .c-am { color: #ffb24a; font-weight: bold; }

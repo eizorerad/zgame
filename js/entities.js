@@ -49,8 +49,10 @@ class Unit {
     }
 
     // order / movement
-    this.order = "idle";         // idle | move | attack | hold
+    this.order = "idle";         // idle | move | amove | attack | hold
     this.holdPosition = false;
+    this.chase = false;          // true = pursue enemies (attack-move / attack)
+    this.attackMove = false;
     this.path = [];              // array of {x,y} tile coords
     this.wpx = null; this.wpy = null;  // current waypoint pixel target
     this.goalTx = null; this.goalTy = null;
@@ -106,20 +108,31 @@ class Unit {
   }
 
   /* ---- orders -------------------------------------------------------- */
+  // plain move: head to the point, "go through" — fire at anything that comes
+  // into weapon range while passing, but never chase off-course.
   orderMove(px, py) {
     this.order = "move";
-    this.target = null;
-    this.commandAttack = null;
-    this.holdPosition = false;
+    this.target = null; this.commandAttack = null;
+    this.holdPosition = false; this.chase = false; this.attackMove = false;
     this.moveGoalX = px; this.moveGoalY = py;
     this._setGoal(px, py);
   }
 
+  // attack-move: advance to the point AND break off to hunt any enemy seen.
+  orderAttackMove(px, py) {
+    this.order = "amove";
+    this.target = null; this.commandAttack = null;
+    this.holdPosition = false; this.chase = true; this.attackMove = true;
+    this.moveGoalX = px; this.moveGoalY = py;
+    this._setGoal(px, py);
+  }
+
+  // attack a specific target: pursue it to the death.
   orderAttack(entity) {
     this.order = "attack";
     this.commandAttack = entity;
     this.target = entity;
-    this.holdPosition = false;
+    this.holdPosition = false; this.chase = true; this.attackMove = false;
     this.wallTarget = null;
     this.moveGoalX = this.moveGoalY = null;
   }
@@ -127,6 +140,7 @@ class Unit {
   orderHold() {
     this.holdPosition = true;
     this.order = "hold";
+    this.chase = false; this.attackMove = false;
     this.path = []; this.wpx = this.wpy = null;
     this.target = null; this.commandAttack = null;
     this.moveGoalX = this.moveGoalY = null;
@@ -134,6 +148,7 @@ class Unit {
 
   stop() {
     this.order = "idle";
+    this.chase = false; this.attackMove = false;
     this.path = []; this.wpx = this.wpy = null;
     this.goalTx = this.goalTy = null;
     this.moveGoalX = this.moveGoalY = null;
@@ -187,22 +202,31 @@ class Unit {
       return;
     }
 
-    // Combat target in range -> shoot, otherwise close distance.
-    if (this.target && this.target.alive) {
-      const d = Util.dist(this.x, this.y, this.target.x, this.target.y);
-      if (d <= this.range) {
-        this.faceTo(this.target.x, this.target.y);     // turret tracks target
-        this._fire(this.target);
-        return;
-      } else if (!this.holdPosition) {
-        if (this.goalTx !== Util.tx(this.target.x) || this.goalTy !== Util.ty(this.target.y)) {
-          this._setGoal(this.target.x, this.target.y);
-        }
-      } else {
-        return; // hold position, target out of range -> stand
+    const tgt = this.target;
+    const pursue = this.chase || (this.commandAttack && this.commandAttack.alive);
+
+    // Hold position: stand still, fire only at what enters weapon range.
+    if (this.holdPosition) {
+      if (tgt && tgt.alive && Util.dist(this.x, this.y, tgt.x, tgt.y) <= this.range) {
+        this.faceTo(tgt.x, tgt.y); this._fire(tgt);
       }
+      return;
     }
 
+    // Pursue mode (attack / attack-move): chase the target, fire when in range.
+    if (pursue && tgt && tgt.alive) {
+      const d = Util.dist(this.x, this.y, tgt.x, tgt.y);
+      if (d <= this.range) { this.faceTo(tgt.x, tgt.y); this._fire(tgt); return; }
+      if (this.goalTx !== Util.tx(tgt.x) || this.goalTy !== Util.ty(tgt.y)) this._setGoal(tgt.x, tgt.y);
+      this._followPath(dt);
+      return;
+    }
+
+    // Go-through move (or idle): keep heading to the goal, only firing at a
+    // target that is already in weapon range — never chase off-course.
+    if (tgt && tgt.alive && Util.dist(this.x, this.y, tgt.x, tgt.y) <= this.range) {
+      this.faceTo(tgt.x, tgt.y); this._fire(tgt);
+    }
     this._followPath(dt);
     this._maybeRepair(dt);
   }
@@ -554,4 +578,9 @@ class Muzzle {
 class RankUp {
   constructor(x, y) { this.x = x; this.y = y; this.t = 0; this.life = 0.8; this.alive = true; }
   update(dt) { this.t += dt; this.y -= dt * 12; if (this.t >= this.life) this.alive = false; }
+}
+// animated marker drawn where the player issues an order
+class CommandMarker {
+  constructor(x, y, kind) { this.x = x; this.y = y; this.kind = kind; this.t = 0; this.life = 0.6; this.alive = true; }
+  update(dt) { this.t += dt; if (this.t >= this.life) this.alive = false; }
 }

@@ -11,11 +11,18 @@ python3 -m http.server 8000   # then visit http://localhost:8000
 ## How to play
 
 You command **BLUE**. The enemy **RED** is run by an aggressive AI commander.
+The cursor is context-sensitive — it shows the order a right-click will give.
 
-- **Drag** a box to select your units.
-- **Right-click** to move (or to attack an enemy unit / factory / fort).
-- **Click one of your factories** to open the build panel and choose what it churns out; **right-click** while a factory is selected to set its rally point.
-- **H** = hold position (units stop chasing and only fire at what enters weapon range), **S** = stop, **Esc** = deselect.
+| Do this | Result |
+|---|---|
+| Left-click / drag a box (Shift adds) | Select your units |
+| Right-click ground | **MOVE** — go through; fire only at point-blank enemies, never chase off course |
+| Right-click an enemy | **ATTACK** — pursue that target to the death |
+| Right-click an enemy/neutral flag or sector | **CAPTURE** — move onto the flag to take the sector |
+| Press **A** then click | **ATTACK-MOVE** — advance and engage everything seen on the way |
+| **H** / **S** / **Esc** | Hold position / Stop / Deselect |
+| Click your factory | Open its build panel; **right-click** sets its rally point |
+
 - Walk infantry into an **empty (grey) vehicle** to crew it.
 - **Snipers** can punch through armour and kill a vehicle's driver outright, leaving the vehicle for anyone to grab.
 

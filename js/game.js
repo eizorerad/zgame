@@ -164,12 +164,16 @@ const G = {
 
     UI.showOverlay(
       "ZONE WARS",
-      "A retro real-time-tactics battle in the spirit of Z.\n\n" +
-      "Territory is time: every sector you hold builds your army faster. " +
-      "Capture flags by touching them, crew abandoned vehicles, snipe enemy drivers, " +
-      "and win by wiping out the enemy, smashing their fort, or sneaking a single " +
-      "unit into their fort entrance.\n\n" +
-      "You are BLUE. Good luck, commander.",
+      "A retro real-time-tactics battle in the spirit of Z. You are BLUE.\n\n" +
+      "CONTROLS\n" +
+      "• Left-click or drag a box to select your units (Shift adds more)\n" +
+      "• Right-click the ground to MOVE (your units go through, only firing point-blank)\n" +
+      "• Right-click an enemy to ATTACK it; right-click an enemy/neutral flag to CAPTURE that sector\n" +
+      "• Press A then click to ATTACK-MOVE (advance and engage everything on the way)\n" +
+      "• H = hold position, S = stop, Esc = deselect\n" +
+      "• Click your factory to choose what it builds; right-click to set its rally point\n\n" +
+      "The cursor tells you which order a right-click will give. Hold sectors to build faster, " +
+      "crew abandoned vehicles, and win by elimination, destroying the enemy fort, or sneaking a unit inside it.",
       "START BATTLE",
       () => this.start()
     );
@@ -551,9 +555,63 @@ const G = {
     this._drawForts(ctx);
     this._drawProjectiles(ctx);
     this._drawUnits(ctx);
-    this._drawFx(ctx);            // fire/debris/smoke render on top of units
+    this._drawOrders(ctx);       // faint lines from selected units to their goal
+    this._drawFx(ctx);           // fire/debris/smoke render on top of units
     this._drawSelectionBox(ctx);
     this._drawMinimap(ctx);
+    this._drawCursor(ctx);       // context-sensitive cursor, drawn last
+  },
+
+  _cmdColor(kind) {
+    return { move: "#9cff6a", amove: "#ffb24a", attack: "#ff5b5b", capture: "#ffe24a", rally: "#4da6ff" }[kind] || "#ffffff";
+  },
+
+  // tiny pixel pictogram centred on (x,y)
+  _cmdIcon(ctx, kind, x, y, col) {
+    ctx.fillStyle = col;
+    if (kind === "attack") {                         // X
+      for (let i = -3; i <= 3; i++) { ctx.fillRect(x + i, y + i, 2, 2); ctx.fillRect(x + i, y - i, 2, 2); }
+    } else if (kind === "capture") {                 // little flag
+      ctx.fillRect(x - 1, y - 5, 2, 10); ctx.fillStyle = col;
+      ctx.fillRect(x + 1, y - 5, 6, 2); ctx.fillRect(x + 1, y - 3, 4, 2);
+    } else if (kind === "move" || kind === "amove") { // down chevron(s)
+      ctx.fillRect(x - 3, y - 2, 6, 2); ctx.fillRect(x - 1, y, 2, 2);
+    } else if (kind === "rally") {
+      ctx.fillRect(x - 1, y - 1, 2, 2);
+    }
+  },
+
+  _drawOrders(ctx) {
+    for (const u of this.units) {
+      if (!u.selected || !u.alive) continue;
+      if (u.commandAttack && u.commandAttack.alive) {
+        PX.line(ctx, u.x, u.y, u.commandAttack.x, u.commandAttack.y, "rgba(255,91,91,0.35)", 2, 2);
+      } else if (u.moveGoalX != null) {
+        const col = u.attackMove ? "rgba(255,178,74,0.35)" : "rgba(156,255,106,0.30)";
+        PX.line(ctx, u.x, u.y, u.moveGoalX, u.moveGoalY, col, 2, 2);
+      }
+    }
+  },
+
+  _drawCursor(ctx) {
+    const m = Input.mouse, kind = Input.attackMoveArmed ? "amove" : Input.hover.kind;
+    const col = kind === "attack" ? "#ff5b5b" : kind === "capture" ? "#ffe24a"
+              : kind === "amove" ? "#ffb24a" : kind === "rally" ? "#4da6ff"
+              : kind === "select" ? "#9cff6a" : kind === "none" ? "#cccccc" : "#9cff6a";
+    // crosshair
+    ctx.fillStyle = col;
+    ctx.fillRect(m.x - 8, m.y - 1, 5, 2); ctx.fillRect(m.x + 4, m.y - 1, 5, 2);
+    ctx.fillRect(m.x - 1, m.y - 8, 2, 5); ctx.fillRect(m.x - 1, m.y + 4, 2, 5);
+    if (kind === "attack") PX.ring(ctx, m.x, m.y, 6, col, 2, 2, 1);
+    else if (kind === "capture") { ctx.fillRect(m.x + 2, m.y - 9, 7, 2); ctx.fillRect(m.x + 2, m.y - 7, 5, 2); ctx.fillRect(m.x + 1, m.y - 9, 2, 7); }
+    else if (kind === "select") PX.brackets(ctx, m.x, m.y, 7, col, 4, 2);
+    // label
+    const label = { attack: "ATTACK", capture: "CAPTURE", move: "MOVE", amove: "ATK-MOVE", rally: "RALLY", select: "SELECT", none: "" }[kind];
+    if (label) {
+      ctx.font = "8px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(m.x + 9, m.y + 8, label.length * 5 + 4, 11);
+      ctx.fillStyle = col; ctx.fillText(label, m.x + 11, m.y + 10);
+    }
   },
 
   _drawScorch(ctx) {
@@ -859,6 +917,13 @@ const G = {
         const a = 1 - e.t / e.life;                       // pixel up-chevron
         ctx.fillStyle = `rgba(255,226,74,${a})`;
         ctx.fillRect(e.x - 3, e.y, 6, 2); ctx.fillRect(e.x - 2, e.y - 2, 4, 2); ctx.fillRect(e.x - 1, e.y - 4, 2, 2);
+      } else if (e instanceof CommandMarker) {
+        const p = e.t / e.life, a = 1 - p;
+        const col = this._cmdColor(e.kind);
+        ctx.globalAlpha = a;
+        PX.ring(ctx, e.x, e.y, 4 + p * 9, col, 2, 2, 1);   // expanding ring
+        this._cmdIcon(ctx, e.kind, e.x, e.y, col);
+        ctx.globalAlpha = 1;
       }
     }
   },
