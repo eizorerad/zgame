@@ -11,8 +11,9 @@ const G = {
   forts: [],
   projectiles: [],
   fx: [],
-  walls: new Map(),         // key -> hp  (destructible)
-  terrain: null,            // Uint8Array: 0 grass, 1 rock, 2 wall
+  walls: new Map(),         // key -> hp  (destructible sandbags)
+  terrain: null,            // Uint8Array of TERR.* values
+  decor: [],                // non-blocking scenery (cacti, etc.)
   time: 0,
   dt: 0,
   running: false,
@@ -24,23 +25,39 @@ const G = {
   tilePassable(tx, ty) {
     if (tx < 0 || ty < 0 || tx >= CFG.COLS || ty >= CFG.ROWS) return false;
     const t = this.terrain[this.tkey(tx, ty)];
-    if (t === 1) return false;                 // solid rock
-    if (t === 2 && this.walls.get(this.tkey(tx, ty)) > 0) return false; // wall
+    if (t === TERR.CLIFF || t === TERR.WATER) return false;
+    if (t === TERR.WALL && this.walls.get(this.tkey(tx, ty)) > 0) return false;
     return true;
   },
   tilePassableIgnoreWall(tx, ty) {
     if (tx < 0 || ty < 0 || tx >= CFG.COLS || ty >= CFG.ROWS) return false;
-    return this.terrain[this.tkey(tx, ty)] !== 1;   // only solid rock blocks
+    const t = this.terrain[this.tkey(tx, ty)];
+    return t !== TERR.CLIFF && t !== TERR.WATER;     // only solid terrain blocks
   },
   isWall(tx, ty) {
-    return this.terrain[this.tkey(tx, ty)] === 2 && this.walls.get(this.tkey(tx, ty)) > 0;
+    return this.terrain[this.tkey(tx, ty)] === TERR.WALL && this.walls.get(this.tkey(tx, ty)) > 0;
+  },
+  terrainAt(px, py) {
+    const tx = Util.tx(px), ty = Util.ty(py);
+    if (tx < 0 || ty < 0 || tx >= CFG.COLS || ty >= CFG.ROWS) return TERR.SAND;
+    return this.terrain[this.tkey(tx, ty)];
   },
   damageWall(tx, ty, dmg) {
     const k = this.tkey(tx, ty);
-    if (this.terrain[k] !== 2) return;
+    if (this.terrain[k] !== TERR.WALL) return;
     const hp = (this.walls.get(k) || 0) - dmg;
-    if (hp <= 0) { this.walls.delete(k); this.terrain[k] = 0; this.fx.push(new Explosion(Util.cx(tx), Util.cy(ty), 10)); }
+    if (hp <= 0) { this.walls.delete(k); this.terrain[k] = TERR.SAND; this.fx.push(new Explosion(Util.cx(tx), Util.cy(ty), 10)); }
     else this.walls.set(k, hp);
+  },
+
+  // a unit sitting near a friendly fort or factory slowly repairs
+  nearFriendlyDepot(u) {
+    const R2 = CFG.REPAIR_RANGE * CFG.REPAIR_RANGE;
+    for (const f of this.forts)
+      if (f.alive && f.team === u.team && Util.dist2(u.x, u.y, f.x, f.y) <= R2) return true;
+    for (const f of this.factories)
+      if (f.alive && f.team === u.team && Util.dist2(u.x, u.y, f.x, f.y) <= R2) return true;
+    return false;
   },
 
   freeSpotNear(px, py) {
@@ -137,6 +154,7 @@ const G = {
 
     UI.init();
     Input.init(canvas);
+    Sprites.build();
 
     this._buildWorld();
     this._cacheBackground();
@@ -168,25 +186,28 @@ const G = {
   /* ---- world generation ---------------------------------------------- */
   _buildWorld() {
     const N = CFG.COLS * CFG.ROWS;
-    this.terrain = new Uint8Array(N); // all grass
+    this.terrain = new Uint8Array(N);          // all SAND (0)
 
-    // scatter solid rock clusters
-    for (let i = 0; i < 16; i++) {
-      const cx = Util.randInt(6, CFG.COLS - 6), cy = Util.randInt(4, CFG.ROWS - 4);
-      const rw = Util.randInt(1, 3), rh = Util.randInt(1, 3);
-      for (let y = cy - rh; y <= cy + rh; y++)
-        for (let x = cx - rw; x <= cx + rw; x++)
-          if (this._inBounds(x, y) && Util.chance(0.7)) this.terrain[this.tkey(x, y)] = 1;
+    // scrub patches (slow going)
+    for (let i = 0; i < 18; i++) this._blob(Util.randInt(4, CFG.COLS - 4), Util.randInt(3, CFG.ROWS - 3), Util.randInt(1, 3), TERR.SCRUB, 0.7);
+
+    // cliff mesas — keep them out of the central fort lane
+    const lane = Math.floor(CFG.ROWS / 2);
+    for (let i = 0; i < 13; i++) {
+      const cy = Util.randInt(3, CFG.ROWS - 3);
+      if (Math.abs(cy - lane) < 4) continue;
+      this._blob(Util.randInt(8, CFG.COLS - 8), cy, Util.randInt(1, 3), TERR.CLIFF, 0.78);
     }
 
-    // destructible wall barriers across the middle (with gaps), to show off
-    // units shooting through walls when boxed in.
-    const midX = Math.floor(CFG.COLS / 2);
-    for (let y = 0; y < CFG.ROWS; y++) {
-      if (y % 7 === 3) continue;                 // leave gaps
-      for (const wx of [midX - 8, midX, midX + 8]) {
-        if (Util.chance(0.85)) { this.terrain[this.tkey(wx, y)] = 2; this.walls.set(this.tkey(wx, y), 60); }
-      }
+    // corner water lakes (impassable) with a couple of decorative inlets
+    this._blob(CFG.COLS - 5, 4, 3, TERR.WATER, 0.85);
+    this._blob(5, CFG.ROWS - 5, 3, TERR.WATER, 0.85);
+
+    // scatter cacti decoration on open sand
+    for (let i = 0; i < 60; i++) {
+      const tx = Util.randInt(1, CFG.COLS - 2), ty = Util.randInt(1, CFG.ROWS - 2);
+      if (this.terrain[this.tkey(tx, ty)] === TERR.SAND && Util.chance(0.5))
+        this.decor.push({ tx, ty, x: Util.cx(tx), y: Util.cy(ty), h: Util.randInt(4, 7) });
     }
 
     // ---- sectors: 4 x 3 grid -----------------------------------------
@@ -244,14 +265,69 @@ const G = {
     const mtx = Math.floor(CFG.COLS / 2), mty = Math.floor(CFG.ROWS / 2);
     this._clearArea(mtx, mty + 6, 1);
     this.units.push(new Unit("machine", "light", null, Util.cx(mtx), Util.cy(mty + 6)));
+
+    // ---- roads + defensive sandbags (need fort/sector positions) ------
+    this._carveRoads(blueHome, redHome);
+    this._placeSandbags();
   },
 
   _inBounds(x, y) { return x >= 0 && y >= 0 && x < CFG.COLS && y < CFG.ROWS; },
 
+  // organic cluster of a terrain type
+  _blob(cx, cy, r, type, density) {
+    for (let y = cy - r; y <= cy + r; y++)
+      for (let x = cx - r; x <= cx + r; x++)
+        if (this._inBounds(x, y) && Util.dist(cx, cy, x, y) <= r + 0.3 && Util.chance(density))
+          this.terrain[this.tkey(x, y)] = type;
+  },
+
+  // lay a road tile, bridging where it crosses water
+  _road(tx, ty) {
+    if (!this._inBounds(tx, ty)) return;
+    const k = this.tkey(tx, ty);
+    this.terrain[k] = (this.terrain[k] === TERR.WATER) ? TERR.BRIDGE : TERR.ROAD;
+    this.walls.delete(k);
+  },
+
+  _carveRoads(blueHome, redHome) {
+    const lane = blueHome.rect.y + Math.floor(blueHome.rect.h / 2);
+    // main highway linking the two forts straight across the middle
+    for (let x = 0; x < CFG.COLS; x++) { this._road(x, lane); this._road(x, lane + 1); }
+    // vertical connectors through each sector column centre
+    for (let c = 0; c < 4; c++) {
+      const cx = Math.floor((c + 0.5) * CFG.COLS / 4);
+      for (let y = 0; y < CFG.ROWS; y++) this._road(cx, y);
+    }
+    // little spurs to every flag so sectors feel connected
+    for (const s of this.sectors) {
+      const fx = Util.tx(s.flag.x), fy = Util.ty(s.flag.y);
+      const cx = Math.floor((Math.floor(fx / (CFG.COLS / 4)) + 0.5) * CFG.COLS / 4);
+      const a = Math.min(cx, fx), b = Math.max(cx, fx);
+      for (let x = a; x <= b; x++) this._road(x, fy);
+    }
+  },
+
+  _placeSandbags() {
+    // a destructible sandbag line bracketing the central highway gap,
+    // so boxed-in units demonstrate shooting through walls.
+    const midX = Math.floor(CFG.COLS / 2), lane = Math.floor(CFG.ROWS / 2);
+    for (let dy = -5; dy <= 6; dy++) {
+      const y = lane + dy;
+      if (Math.abs(dy) <= 1) continue;            // leave the road open
+      for (const x of [midX - 6, midX + 6]) {
+        if (this.terrain[this.tkey(x, y)] === TERR.SAND && Util.chance(0.8)) {
+          this.terrain[this.tkey(x, y)] = TERR.WALL;
+          this.walls.set(this.tkey(x, y), 60);
+        }
+      }
+    }
+  },
+
   _clearArea(tx, ty, r) {
     for (let y = ty - r; y <= ty + r; y++)
       for (let x = tx - r; x <= tx + r; x++)
-        if (this._inBounds(x, y)) { this.terrain[this.tkey(x, y)] = 0; this.walls.delete(this.tkey(x, y)); }
+        if (this._inBounds(x, y)) { this.terrain[this.tkey(x, y)] = TERR.SAND; this.walls.delete(this.tkey(x, y)); }
+    this.decor = this.decor.filter(d => Math.abs(d.tx - tx) > r || Math.abs(d.ty - ty) > r);
   },
 
   _addFactory(sector, kind, dx, dy) {
@@ -373,19 +449,56 @@ const G = {
   _cacheBackground() {
     const bg = document.createElement("canvas");
     bg.width = this.canvas.width; bg.height = this.canvas.height;
-    const c = bg.getContext("2d");
-    const T = CFG.TILE;
+    const c = bg.getContext("2d"); c.imageSmoothingEnabled = false;
+    const T = CFG.TILE, K = CFG.COLORS;
+    const at = (x, y) => (this._inBounds(x, y) ? this.terrain[this.tkey(x, y)] : TERR.SAND);
+
     for (let y = 0; y < CFG.ROWS; y++) {
       for (let x = 0; x < CFG.COLS; x++) {
         const t = this.terrain[this.tkey(x, y)];
-        if (t === 1) {
-          c.fillStyle = CFG.COLORS.rockDk; c.fillRect(x * T, y * T, T, T);
-          c.fillStyle = CFG.COLORS.rock; c.fillRect(x * T + 2, y * T + 2, T - 4, T - 4);
-        } else {
-          c.fillStyle = ((x + y) & 1) ? CFG.COLORS.grass : CFG.COLORS.grass2;
-          c.fillRect(x * T, y * T, T, T);
+        const X = x * T, Y = y * T;
+        // sand underlay everywhere (so road/scrub edges blend)
+        c.fillStyle = ((x + y) & 1) ? K.sand : K.sand2; c.fillRect(X, Y, T, T);
+        if ((x * 7 + y * 13) % 5 === 0) { c.fillStyle = K.speck; c.fillRect(X + ((x * 5) % T), Y + ((y * 3) % T), 2, 2); }
+
+        if (t === TERR.SCRUB) {
+          c.fillStyle = K.sand3; c.fillRect(X, Y, T, T);
+          c.fillStyle = K.scrub;
+          for (let i = 0; i < 5; i++) c.fillRect(X + ((i * 5 + y) % (T - 2)), Y + ((i * 7 + x) % (T - 2)), 2, 2);
+        } else if (t === TERR.ROAD) {
+          c.fillStyle = K.road; c.fillRect(X, Y, T, T);
+          c.fillStyle = K.roadLo; c.fillRect(X, Y, T, 2); c.fillRect(X, Y + T - 2, T, 2);
+          // dashed centre line on the main horizontal lane
+          if (at(x - 1, y) === TERR.ROAD && at(x + 1, y) === TERR.ROAD && (x & 1)) {
+            c.fillStyle = K.roadLine; c.fillRect(X + 4, Y + T / 2 - 1, T - 8, 2);
+          }
+        } else if (t === TERR.WATER) {
+          c.fillStyle = K.water; c.fillRect(X, Y, T, T);
+          c.fillStyle = K.water2; c.fillRect(X, Y + T - 4, T, 4);
+          c.fillStyle = K.waterHi; c.fillRect(X + 3, Y + 4, 5, 1); c.fillRect(X + 9, Y + 9, 4, 1);
+        } else if (t === TERR.BRIDGE) {
+          c.fillStyle = K.water; c.fillRect(X, Y, T, T);
+          c.fillStyle = K.bridge; c.fillRect(X, Y + 1, T, T - 2);
+          c.fillStyle = K.bridgeLo; for (let p = 0; p < T; p += 4) c.fillRect(X + p, Y + 1, 1, T - 2);
+        } else if (t === TERR.CLIFF) {
+          c.fillStyle = K.cliff; c.fillRect(X, Y, T, T);
+          c.fillStyle = K.cliffHi; c.fillRect(X, Y, T, 3);                // lit top
+          if (at(x, y + 1) !== TERR.CLIFF) { c.fillStyle = K.cliffLo; c.fillRect(X, Y + T - 4, T, 4); } // drop shadow
+          if (at(x + 1, y) !== TERR.CLIFF) { c.fillStyle = K.cliffLo; c.fillRect(X + T - 3, Y, 3, T); }
+          if (at(x - 1, y) !== TERR.CLIFF) { c.fillStyle = K.cliffHi; c.fillRect(X, Y, 2, T); }
+          c.fillStyle = K.cliffLo; c.fillRect(X + 4, Y + 6, 2, 2); c.fillRect(X + 9, Y + 10, 2, 2); // pits
         }
       }
+    }
+
+    // cacti decorations
+    for (const d of this.decor) {
+      const X = d.x, Y = d.y;
+      c.fillStyle = "rgba(0,0,0,0.25)"; c.fillRect(X - 2, Y + 3, 6, 2);     // shadow
+      c.fillStyle = K.cactus; c.fillRect(X - 1, Y - d.h, 3, d.h + 3);        // trunk
+      c.fillRect(X - 4, Y - d.h + 2, 3, 2); c.fillRect(X - 4, Y - d.h + 2, 2, 5); // left arm
+      c.fillRect(X + 2, Y - d.h + 4, 3, 2); c.fillRect(X + 3, Y - d.h, 2, 6);     // right arm
+      c.fillStyle = K.cactusHi; c.fillRect(X - 1, Y - d.h, 1, d.h);
     }
     this.bg = bg;
   },
@@ -404,13 +517,17 @@ const G = {
       ctx.strokeRect(s.px + 1, s.py + 1, s.pw - 2, s.ph - 2);
     }
 
-    // destructible walls (dynamic)
+    // destructible sandbag walls (dynamic — show wear as they take damage)
     for (const [k, hp] of this.walls) {
       const x = (k % CFG.COLS) * T, y = Math.floor(k / CFG.COLS) * T;
       const dmg = Util.clamp(hp / 60, 0, 1);
-      ctx.fillStyle = CFG.COLORS.wall; ctx.fillRect(x, y, T, T);
-      ctx.fillStyle = "rgba(0,0,0," + (0.5 * (1 - dmg)) + ")"; ctx.fillRect(x, y, T, T);
-      ctx.strokeStyle = "#5a4d35"; ctx.strokeRect(x + 0.5, y + 0.5, T - 1, T - 1);
+      ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.fillRect(x + 2, y + T - 3, T - 2, 3);
+      for (let r = 0; r < 3; r++) for (let cc = 0; cc < 3; cc++) {
+        if ((r * 3 + cc) / 9 > dmg) continue;            // bags blown away as HP drops
+        ctx.fillStyle = (r + cc) & 1 ? CFG.COLORS.wall : CFG.COLORS.wallLo;
+        ctx.fillRect(x + cc * 5 + 1, y + r * 5 + 1, 5, 5);
+        ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(x + cc * 5 + 1, y + r * 5 + 4, 5, 1);
+      }
     }
 
     this._drawFlags(ctx);
@@ -420,6 +537,7 @@ const G = {
     this._drawProjectiles(ctx);
     this._drawUnits(ctx);
     this._drawSelectionBox(ctx);
+    this._drawMinimap(ctx);
   },
 
   _teamColor(team) {
@@ -489,45 +607,79 @@ const G = {
     }
   },
 
+  _dirOf(ang) { return ((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8; },
+
+  _blit(ctx, img, x, y) {
+    if (!img) return;
+    ctx.drawImage(img, Math.round(x - img.width / 2), Math.round(y - img.height / 2));
+  },
+
   _drawUnits(ctx) {
     for (const u of this.units) {
-      const c = this._teamColor(u.team), d = this._teamDark(u.team);
+      const palTeam = u.team === TEAM.BLUE ? "blue" : u.team === TEAM.RED ? "red" : "neutral";
+
+      // soft shadow
+      ctx.fillStyle = "rgba(0,0,0,0.28)";
+      ctx.beginPath(); ctx.ellipse(u.x, u.y + u.radius * 0.55, u.radius * 0.95, u.radius * 0.5, 0, 0, 7); ctx.fill();
+
       if (u.kind === "machine") {
-        const w = u.radius * 2, h = u.radius * 1.7;
-        ctx.save(); ctx.translate(u.x, u.y); ctx.rotate(u.facing);
-        ctx.fillStyle = u.driver ? d : "#555"; ctx.fillRect(-w / 2, -h / 2, w, h);
-        ctx.fillStyle = u.driver ? c : "#888"; ctx.fillRect(-w / 2 + 2, -h / 2 + 2, w - 4, h - 4);
-        // barrel
-        ctx.fillStyle = "#111"; ctx.fillRect(0, -2, u.radius + (u.immobile ? 6 : 8), 4);
-        if (u.immobile) { ctx.fillStyle = "#222"; ctx.fillRect(-w/2, -h/2, w, 3); } // gun base
-        ctx.restore();
-        // armour bar
-        if (u.driver) this._bar(ctx, u.x, u.y - u.radius - 5, w + 4, u.armour / u.maxArmour, "#e8c050");
+        const aim = this._dirOf(u.target ? u.facing : u.hullFacing);
+        if (u.immobile) {
+          this._blit(ctx, Sprites.gunBase(palTeam), u.x, u.y);
+          this._blit(ctx, Sprites.gunTurret(palTeam, aim), u.x, u.y);
+        } else {
+          this._blit(ctx, Sprites.hull(u.typeKey, palTeam, this._dirOf(u.hullFacing)), u.x, u.y);
+          this._blit(ctx, Sprites.turret(u.typeKey, palTeam, aim), u.x, u.y);
+        }
+        if (u.driver) this._bar(ctx, u.x, u.y - u.radius - 6, u.radius * 2 + 4, u.armour / u.maxArmour, "#e8c050");
       } else {
-        // infantry: little diamond, sniper drawn with a long marker
-        ctx.fillStyle = "#000";
-        ctx.beginPath(); ctx.arc(u.x, u.y, u.radius + 1, 0, 7); ctx.fill();
-        ctx.fillStyle = c;
-        ctx.beginPath(); ctx.arc(u.x, u.y, u.radius, 0, 7); ctx.fill();
-        // type pip
-        ctx.fillStyle = "#000";
-        const pip = { grunt: "", psycho: "✕", sniper: "·", pyro: "▲" }[u.typeKey] || "";
-        ctx.font = "7px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(pip, u.x, u.y);
-        // facing tick
-        ctx.strokeStyle = "#000"; ctx.beginPath(); ctx.moveTo(u.x, u.y);
-        ctx.lineTo(u.x + Math.cos(u.facing) * (u.radius + 3), u.y + Math.sin(u.facing) * (u.radius + 3)); ctx.stroke();
+        const frame = u.moving ? (Math.floor(u.animClock) & 1) : 0;
+        this._blit(ctx, Sprites.infantry(u.typeKey, palTeam, this._dirOf(u.facing), frame), u.x, u.y);
         this._bar(ctx, u.x, u.y - u.radius - 5, u.radius * 2 + 2, u.hp / u.maxHp, "#7d7");
+      }
+
+      // veterancy chevrons
+      if (u.rank > 0) {
+        ctx.fillStyle = u.rank >= 3 ? "#ffe24a" : "#e8e8e8";
+        for (let i = 0; i < u.rank; i++) ctx.fillRect(u.x - 3 + i * 3, u.y + u.radius + 3, 2, 2);
       }
       if (u.selected) {
         ctx.strokeStyle = "#9cff6a"; ctx.lineWidth = 1.5;
-        ctx.beginPath(); ctx.arc(u.x, u.y, u.radius + 4, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(u.x, u.y, u.radius + 5, 0, 7); ctx.stroke();
       }
       if (u.holdPosition) {
-        ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.arc(u.x, u.y, u.radius + 6, 0, 7); ctx.stroke();
+        ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = 1; ctx.setLineDash([2, 2]);
+        ctx.beginPath(); ctx.arc(u.x, u.y, u.radius + 7, 0, 7); ctx.stroke(); ctx.setLineDash([]);
       }
     }
+  },
+
+  _drawMinimap(ctx) {
+    const mw = 150, mh = mw * CFG.ROWS / CFG.COLS;
+    const ox = this.canvas.width - mw - 8, oy = 8;
+    const sx = mw / (CFG.COLS * CFG.TILE), sy = mh / (CFG.ROWS * CFG.TILE);
+    ctx.fillStyle = "rgba(8,10,12,0.85)"; ctx.fillRect(ox - 2, oy - 2, mw + 4, mh + 4);
+    // sectors
+    for (const s of this.sectors) {
+      const col = s.owner === TEAM.BLUE ? "rgba(77,166,255,0.5)" : s.owner === TEAM.RED ? "rgba(255,91,91,0.5)" : "rgba(120,110,90,0.5)";
+      ctx.fillStyle = col;
+      ctx.fillRect(ox + s.px * sx, oy + s.py * sy, s.pw * sx, s.ph * sy);
+      ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 0.5;
+      ctx.strokeRect(ox + s.px * sx, oy + s.py * sy, s.pw * sx, s.ph * sy);
+    }
+    // forts
+    for (const f of this.forts) {
+      if (!f.alive) continue;
+      ctx.fillStyle = this._teamColor(f.team);
+      ctx.fillRect(ox + f.x * sx - 2, oy + f.y * sy - 2, 4, 4);
+    }
+    // units
+    for (const u of this.units) {
+      if (!u.crewed) continue;
+      ctx.fillStyle = this._teamColor(u.team);
+      ctx.fillRect(ox + u.x * sx - 0.5, oy + u.y * sy - 0.5, u.kind === "machine" ? 2 : 1.4, u.kind === "machine" ? 2 : 1.4);
+    }
+    ctx.strokeStyle = "#2b3a44"; ctx.lineWidth = 1; ctx.strokeRect(ox - 2, oy - 2, mw + 4, mh + 4);
   },
 
   _bar(ctx, cx, y, w, frac, col) {
@@ -564,6 +716,17 @@ const G = {
         ctx.globalAlpha = 1 - e.t / e.life;
         ctx.beginPath(); ctx.moveTo(e.x1, e.y1); ctx.lineTo(e.x2, e.y2); ctx.stroke();
         ctx.globalAlpha = 1;
+      } else if (e instanceof Muzzle) {
+        const a = 1 - e.t / e.life;
+        ctx.fillStyle = `rgba(255,230,140,${a})`;
+        ctx.beginPath(); ctx.arc(e.x, e.y, 3 * a + 1, 0, 7); ctx.fill();
+        ctx.fillStyle = `rgba(255,255,255,${a})`;
+        ctx.fillRect(e.x - 1, e.y - 1, 2, 2);
+      } else if (e instanceof RankUp) {
+        const a = 1 - e.t / e.life;
+        ctx.fillStyle = `rgba(255,226,74,${a})`;
+        ctx.font = "9px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("▲", e.x, e.y);
       }
     }
   },

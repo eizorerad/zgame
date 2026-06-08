@@ -22,7 +22,14 @@ class Unit {
     this.x = x; this.y = y;
     this.alive = true;
     this.selected = false;
-    this.facing = 0;
+    this.facing = 0;            // turret / aim direction
+    this.hullFacing = 0;        // body / movement direction
+    this.animClock = 0;         // walk-cycle clock
+    this.moving = false;
+
+    // veterancy
+    this.kills = 0;
+    this.rank = 0;
 
     const table = kind === "infantry" ? INFANTRY_TYPES
                 : (VEHICLE_TYPES[typeKey] ? VEHICLE_TYPES : GUN_TYPES);
@@ -67,12 +74,36 @@ class Unit {
 
   get radius() { return this.stats.radius; }
   get speed() { return this.kind === "machine" && this.immobile ? 0 : this.stats.speed; }
-  get range() { return this.stats.range; }
   get crewed() { return this.kind === "infantry" || !!this.driver; }
+
+  // ---- veterancy-scaled combat stats ----
+  get range() { return this.stats.range * (1 + this.rank * VET.rangePerRank); }
+  get dmg() { return this.stats.dmg * (1 + this.rank * VET.dmgPerRank); }
+  get fireCooldown() { return this.stats.cooldown * (1 + this.rank * VET.cooldownPerRank); }
 
   isVehicle() { return this.kind === "machine" && !this.immobile; }
   isGun() { return this.kind === "machine" && this.immobile; }
   isSniper() { return this.kind === "infantry" && this.typeKey === "sniper"; }
+
+  gainKill() {
+    this.kills++;
+    let r = 0;
+    for (let i = VET.thresholds.length - 1; i >= 0; i--) {
+      if (this.kills >= VET.thresholds[i]) { r = i; break; }
+    }
+    if (r > this.rank) {
+      this.rank = r;
+      // promotions restore and grow the unit's durability
+      if (this.kind === "infantry") {
+        const nm = this.stats.hp * (1 + r * VET.hpPerRank);
+        this.hp += (nm - this.maxHp); this.maxHp = nm;
+      } else {
+        const nm = this.stats.armour * (1 + r * VET.hpPerRank);
+        this.armour += (nm - this.maxArmour); this.maxArmour = nm;
+      }
+      G.fx.push(new RankUp(this.x, this.y));
+    }
+  }
 
   /* ---- orders -------------------------------------------------------- */
   orderMove(px, py) {
@@ -144,6 +175,7 @@ class Unit {
   update(dt) {
     if (!this.alive) return;
     if (this.cooldown > 0) this.cooldown -= dt;
+    this.moving = false;
 
     // Empty machines just sit there waiting to be crewed.
     if (this.kind === "machine" && !this.driver) return;
@@ -151,6 +183,7 @@ class Unit {
     // Attacking a wall to clear a path.
     if (this.wallTarget) {
       this._fightWall(dt);
+      this._maybeRepair(dt);
       return;
     }
 
@@ -158,12 +191,10 @@ class Unit {
     if (this.target && this.target.alive) {
       const d = Util.dist(this.x, this.y, this.target.x, this.target.y);
       if (d <= this.range) {
-        this.faceTo(this.target.x, this.target.y);
+        this.faceTo(this.target.x, this.target.y);     // turret tracks target
         this._fire(this.target);
-        // tanks/guns hold ground while firing; infantry too
         return;
       } else if (!this.holdPosition) {
-        // chase
         if (this.goalTx !== Util.tx(this.target.x) || this.goalTy !== Util.ty(this.target.y)) {
           this._setGoal(this.target.x, this.target.y);
         }
@@ -173,6 +204,7 @@ class Unit {
     }
 
     this._followPath(dt);
+    this._maybeRepair(dt);
   }
 
   _followPath(dt) {
@@ -180,18 +212,46 @@ class Unit {
     const dx = this.wpx - this.x, dy = this.wpy - this.y;
     const d = Math.hypot(dx, dy);
     if (d < 2) { this.advanceWaypoint(); return; }
-    const sp = this.speed * dt;
+    // terrain modifies ground speed (roads fast, scrub slow)
+    const terr = G.terrainAt(this.x, this.y);
+    const sp = this.speed * (TERRAIN_SPEED[terr] ?? 1) * dt;
     const nx = this.x + (dx / d) * sp;
     const ny = this.y + (dy / d) * sp;
-    this.faceTo(this.wpx, this.wpy);
+    this.hullFacing = Math.atan2(dy, dx);
+    if (!this.target) this.facing = this.hullFacing;   // turret rests forward
     // block on freshly-changed walls
     if (G.tilePassable(Util.tx(nx), Util.ty(ny))) {
       this.x = nx; this.y = ny;
+      this.moving = true;
+      this.animClock += dt * 9;
+      if (this.isVehicle()) this._crush();
     } else {
       this.recomputePath();
     }
     if (this.path.length === 0 && Math.hypot(this.wpx - this.x, this.wpy - this.y) < 2) {
       this.stop();
+    }
+  }
+
+  // tanks/jeeps flatten enemy infantry they drive over
+  _crush() {
+    for (const o of G.units) {
+      if (!o.alive || o.kind !== "infantry") continue;
+      if (o.team === this.team) continue;
+      if (Util.dist(this.x, this.y, o.x, o.y) <= this.radius + o.radius - 1) {
+        o.applyDamage(CFG.CRUSH_DMG, this, false);
+        G.fx.push(new Spark(o.x, o.y, "#7a1010"));
+      }
+    }
+  }
+
+  _maybeRepair(dt) {
+    if (this.target || this.cooldown > this.stats.cooldown * 0.5) return;
+    if (!G.nearFriendlyDepot(this)) return;
+    if (this.kind === "infantry") {
+      if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + CFG.REPAIR_RATE * dt);
+    } else if (this.driver) {
+      if (this.armour < this.maxArmour) this.armour = Math.min(this.maxArmour, this.armour + CFG.REPAIR_RATE * dt);
     }
   }
 
@@ -203,7 +263,7 @@ class Unit {
     if (d <= this.range) {
       this.faceTo(wx, wy);
       if (this.cooldown <= 0) {
-        this.cooldown = this.stats.cooldown;
+        this.cooldown = this.fireCooldown;
         G.spawnProjectile(this, { x: wx, y: wy, isWall: true, tx: w.x, ty: w.y }, false);
       }
     } else {
@@ -217,9 +277,10 @@ class Unit {
 
   _fire(target) {
     if (this.cooldown > 0) return;
-    this.cooldown = this.stats.cooldown;
+    this.cooldown = this.fireCooldown;
     const sniper = this.isSniper() && Util.chance(this.stats.snipeChance || 0);
     G.spawnProjectile(this, target, sniper);
+    G.fx.push(new Muzzle(this.x, this.y, this.facing, this.team));
   }
 
   faceTo(px, py) { this.facing = Math.atan2(py - this.y, px - this.x); }
@@ -229,7 +290,7 @@ class Unit {
     if (!this.alive) return;
     if (this.kind === "infantry") {
       this.hp -= amount;
-      if (this.hp <= 0) this.die();
+      if (this.hp <= 0) this.die(attacker);
       return;
     }
     // machine
@@ -237,10 +298,11 @@ class Unit {
       // Sniper bypasses armour and kills the driver. Machine survives, empty.
       this.ejectDriver(true);
       G.fx.push(new Spark(this.x, this.y, "#fff"));
+      if (attacker && attacker.gainKill) attacker.gainKill();   // crew kill counts
       return;
     }
     this.armour -= amount;
-    if (this.armour <= 0) this.die();
+    if (this.armour <= 0) this.die(attacker);
   }
 
   ejectDriver(killed) {
@@ -252,9 +314,10 @@ class Unit {
     }
   }
 
-  die() {
+  die(attacker) {
     this.alive = false;
     G.fx.push(new Explosion(this.x, this.y, this.kind === "machine" ? 18 : 9));
+    if (attacker && attacker.alive && attacker.gainKill) attacker.gainKill();
   }
 }
 
@@ -383,7 +446,7 @@ class Projectile {
     this.team = attacker.team;
     this.attacker = attacker;
     this.target = target;
-    this.dmg = attacker.stats.dmg;
+    this.dmg = attacker.dmg !== undefined ? attacker.dmg : attacker.stats.dmg;
     this.sniper = sniper;
     this.speed = sniper ? 700 : 320;
     this.alive = true;
@@ -429,4 +492,12 @@ class Spark {
 class Tracer {
   constructor(x1, y1, x2, y2, team) { this.x1 = x1; this.y1 = y1; this.x2 = x2; this.y2 = y2; this.team = team; this.t = 0; this.life = 0.12; this.alive = true; }
   update(dt) { this.t += dt; if (this.t >= this.life) this.alive = false; }
+}
+class Muzzle {
+  constructor(x, y, ang, team) { this.x = x + Math.cos(ang) * 8; this.y = y + Math.sin(ang) * 8; this.ang = ang; this.team = team; this.t = 0; this.life = 0.07; this.alive = true; }
+  update(dt) { this.t += dt; if (this.t >= this.life) this.alive = false; }
+}
+class RankUp {
+  constructor(x, y) { this.x = x; this.y = y; this.t = 0; this.life = 0.8; this.alive = true; }
+  update(dt) { this.t += dt; this.y -= dt * 12; if (this.t >= this.life) this.alive = false; }
 }

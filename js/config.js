@@ -23,57 +23,94 @@ const CFG = {
   FORT_TURRET_DMG: 14,
   FORT_TURRET_COOLDOWN: 0.7,
 
+  // Repair: units near a friendly fort/factory recover this much per second
+  REPAIR_RANGE: 70,
+  REPAIR_RATE: 10,
+
+  // Tanks crush enemy infantry they roll over
+  CRUSH_DMG: 999,
+
+  // Desert palette (tuned to the classic Z look)
   COLORS: {
-    neutral: "#b8b8b8",
-    blue: "#4da6ff",
+    sand:   "#caa46a",
+    sand2:  "#c09a5c",
+    sand3:  "#b88f4f",
+    speck:  "#d8b97e",
+    cliff:  "#8a6f43",
+    cliffHi:"#a98a55",
+    cliffLo:"#5f4a28",
+    road:   "#9a9488",
+    roadLo: "#86806f",
+    roadLine:"#cfc8b4",
+    water:  "#3f74a8",
+    water2: "#356492",
+    waterHi:"#5f97c8",
+    bridge: "#7a5a32",
+    bridgeLo:"#5e4526",
+    scrub:  "#7d8a3c",
+    cactus: "#3f7a3a",
+    cactusHi:"#5aa552",
+    wall:   "#b89a5e",       // sandbags
+    wallLo: "#8a7038",
+    neutral:"#9a9a9a",
+    blue:   "#4da6ff",
     blueDk: "#1a4d80",
-    red: "#ff5b5b",
-    redDk: "#802121",
-    grass: "#2f4a2a",
-    grass2: "#27401f",
-    rock: "#6b6457",
-    rockDk: "#4a4439",
-    wall: "#7a6b50",
-    bridge: "#5a4632",
+    red:    "#ff5b5b",
+    redDk:  "#802121",
+  },
+
+  // Team art palettes used by the sprite generator
+  TEAM_PAL: {
+    blue:    { main:"#4da6ff", dark:"#1c5a99", light:"#bcdcff", metal:"#39505f", metalLo:"#26333d", trim:"#0e3a63" },
+    red:     { main:"#ff6a5b", dark:"#a33024", light:"#ffc2b2", metal:"#5a3a34", metalLo:"#3a221e", trim:"#5a160d" },
+    neutral: { main:"#9a9a9a", dark:"#5f5f5f", light:"#cccccc", metal:"#4a4a4a", metalLo:"#2e2e2e", trim:"#333333" },
   },
 };
 
 const TEAM = { NEUTRAL: "neutral", BLUE: "blue", RED: "red" };
+function enemyOf(team) { return team === TEAM.BLUE ? TEAM.RED : TEAM.BLUE; }
 
-function enemyOf(team) {
-  return team === TEAM.BLUE ? TEAM.RED : TEAM.BLUE;
-}
+/* ---- terrain ------------------------------------------------------------- */
+const TERR = { SAND: 0, CLIFF: 1, WALL: 2, ROAD: 3, WATER: 4, BRIDGE: 5, SCRUB: 6 };
+// movement speed multiplier per terrain (impassable ones unused)
+const TERRAIN_SPEED = { 0: 1.0, 1: 0, 2: 0, 3: 1.55, 4: 0, 5: 1.0, 6: 0.55 };
 
-/* ---- Infantry types -------------------------------------------------------
- * baseTime  : seconds to build at 0 sectors
- * radius/hp/speed/range/dmg/cooldown are runtime stats
- * sniper    : chance to bypass vehicle armour & kill the driver outright
- * ------------------------------------------------------------------------- */
+/* ---- veterancy ----------------------------------------------------------
+ * Kills promote a unit through ranks, each granting combat bonuses. Pure Z:
+ * grunts that survive become terrifying.
+ * ----------------------------------------------------------------------- */
+const VET = {
+  thresholds: [0, 2, 5, 9],          // kills needed for rank 0..3
+  names: ["Rookie", "Trained", "Veteran", "Hero"],
+  dmgPerRank: 0.20,
+  hpPerRank: 0.18,
+  rangePerRank: 0.06,
+  cooldownPerRank: -0.05,            // faster firing
+};
+
+/* ---- Infantry types ----------------------------------------------------- */
 const INFANTRY_TYPES = {
   grunt:  { name: "Grunt",  baseTime: 8,  hp: 30,  speed: 46, range: 70,  dmg: 6,  cooldown: 0.45, radius: 5, aggro: 120 },
   psycho: { name: "Psycho", baseTime: 14, hp: 55,  speed: 58, range: 40,  dmg: 16, cooldown: 0.30, radius: 6, aggro: 170 },
-  sniper: { name: "Sniper", baseTime: 18, hp: 24,  speed: 40, range: 150, dmg: 10, cooldown: 1.3,  radius: 5, aggro: 190, snipeChance: 0.35 },
+  sniper: { name: "Sniper", baseTime: 18, hp: 24,  speed: 40, range: 155, dmg: 10, cooldown: 1.3,  radius: 5, aggro: 195, snipeChance: 0.35 },
   pyro:   { name: "Pyro",   baseTime: 16, hp: 40,  speed: 48, range: 55,  dmg: 22, cooldown: 0.5,  radius: 6, aggro: 130 },
 };
 
-/* ---- Vehicle types --------------------------------------------------------
- * armour : separate pool that absorbs hits before the driver is exposed
- * Vehicles are inert until an infantry unit crews them.
- * ------------------------------------------------------------------------- */
+/* ---- Vehicle types ------------------------------------------------------ */
 const VEHICLE_TYPES = {
-  jeep:    { name: "Jeep",       baseTime: 20, armour: 60,  speed: 78, range: 90,  dmg: 8,  cooldown: 0.4, radius: 9,  aggro: 150 },
-  light:   { name: "Light Tank", baseTime: 35, armour: 130, speed: 56, range: 110, dmg: 18, cooldown: 0.9, radius: 11, aggro: 170 },
-  medium:  { name: "Med Tank",   baseTime: 60, armour: 220, speed: 44, range: 130, dmg: 30, cooldown: 1.2, radius: 13, aggro: 190 },
+  jeep:    { name: "Jeep",       baseTime: 20, armour: 60,  speed: 82, range: 95,  dmg: 8,  cooldown: 0.35, radius: 9,  aggro: 150 },
+  light:   { name: "Light Tank", baseTime: 35, armour: 130, speed: 56, range: 115, dmg: 18, cooldown: 0.9,  radius: 12, aggro: 175 },
+  medium:  { name: "Med Tank",   baseTime: 60, armour: 230, speed: 44, range: 135, dmg: 32, cooldown: 1.2,  radius: 14, aggro: 195 },
+  apc:     { name: "APC",        baseTime: 30, armour: 160, speed: 64, range: 80,  dmg: 7,  cooldown: 0.4,  radius: 13, aggro: 150 },
 };
 
 /* ---- Gun emplacements (built by gun factories, immobile) ---------------- */
 const GUN_TYPES = {
-  pillbox: { name: "Pillbox", baseTime: 30, armour: 180, speed: 0, range: 160, dmg: 22, cooldown: 0.9, radius: 11, aggro: 200, immobile: true },
+  pillbox: { name: "Pillbox", baseTime: 30, armour: 200, speed: 0, range: 165, dmg: 24, cooldown: 0.85, radius: 12, aggro: 210, immobile: true },
 };
 
-// Which unit list a factory of a given kind can produce
 const FACTORY_OUTPUT = {
   robot:   { table: INFANTRY_TYPES, kind: "infantry", keys: ["grunt", "psycho", "sniper", "pyro"] },
-  vehicle: { table: VEHICLE_TYPES,  kind: "vehicle",  keys: ["jeep", "light", "medium"] },
+  vehicle: { table: VEHICLE_TYPES,  kind: "vehicle",  keys: ["jeep", "light", "medium", "apc"] },
   gun:     { table: GUN_TYPES,      kind: "gun",      keys: ["pillbox"] },
 };
