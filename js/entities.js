@@ -481,9 +481,63 @@ class Projectile {
 }
 
 /* ---- lightweight visual effects ---------------------------------------- */
+/* A chunky Z-style explosion: white flash -> orange fireball -> grey smoke,
+ * with metal/ember debris that launches outward, arcs under gravity and
+ * tumbles, plus a scorch decal left on the ground. */
 class Explosion {
-  constructor(x, y, r) { this.x = x; this.y = y; this.r = r; this.t = 0; this.life = 0.45; this.alive = true; }
-  update(dt) { this.t += dt; if (this.t >= this.life) this.alive = false; }
+  constructor(x, y, size) {
+    this.x = x; this.y = y; this.size = size;
+    this.t = 0; this.alive = true;
+    this.fbDur = 0.30 + size * 0.006;          // fireball duration
+    this.shock = size >= 14;                    // big blasts get a shockwave ring
+
+    // fireball puffs (offset blobs so it's lumpy, not a clean circle)
+    this.puffs = [];
+    const np = Math.max(3, Math.round(size / 3));
+    for (let i = 0; i < np; i++) {
+      const a = Math.random() * 7, r = Math.random() * size * 0.45;
+      this.puffs.push({ ox: Math.cos(a) * r, oy: Math.sin(a) * r, r: size * (0.4 + Math.random() * 0.55), delay: Math.random() * 0.10 });
+    }
+
+    // flying debris
+    this.debris = [];
+    const nd = Math.max(6, Math.round(size * 1.0));
+    const chunk = ["#2b2b2b", "#454545", "#5a5246", "#6b5a3a", "#1c1c1c"];
+    for (let i = 0; i < nd; i++) {
+      const a = Math.random() * 7, sp = size * (2.2 + Math.random() * 5);
+      const hot = Math.random() < 0.4;
+      this.debris.push({
+        x: 0, y: 0,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - size * (1.0 + Math.random()), // biased upward
+        g: 150 + Math.random() * 90, fric: 1.4 + Math.random(),
+        t: 0, life: 0.5 + Math.random() * 0.7,
+        s: 1 + Math.random() * 2.2, rot: Math.random() * 7, spin: (Math.random() - 0.5) * 12,
+        hot, c: hot ? null : chunk[(Math.random() * chunk.length) | 0],
+      });
+    }
+
+    // rising smoke
+    this.smoke = [];
+    const ns = Math.max(2, Math.round(size / 4));
+    for (let i = 0; i < ns; i++)
+      this.smoke.push({ ox: (Math.random() - 0.5) * size * 0.7, r: size * (0.35 + Math.random() * 0.3), rise: 12 + Math.random() * 26, delay: 0.06 + Math.random() * 0.22, life: 0.8 + Math.random() * 0.7 });
+
+    this.maxLife = 1.5 + size * 0.02;
+    G.scorch.push({ x, y, r: size * 0.7, t: 0, life: 7 });
+  }
+
+  update(dt) {
+    this.t += dt;
+    for (const d of this.debris) {
+      if (d.t >= d.life) continue;
+      d.t += dt;
+      d.vy += d.g * dt;
+      d.vx -= d.vx * d.fric * dt;
+      d.x += d.vx * dt; d.y += d.vy * dt;
+      d.rot += d.spin * dt;
+    }
+    if (this.t >= this.maxLife) this.alive = false;
+  }
 }
 class Spark {
   constructor(x, y, c) { this.x = x; this.y = y; this.c = c; this.t = 0; this.life = 0.18; this.alive = true; }

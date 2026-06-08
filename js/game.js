@@ -11,6 +11,7 @@ const G = {
   forts: [],
   projectiles: [],
   fx: [],
+  scorch: [],                // ground burn decals left by explosions
   walls: new Map(),         // key -> hp  (destructible sandbags)
   terrain: null,            // Uint8Array of TERR.* values
   decor: [],                // non-blocking scenery (cacti, etc.)
@@ -372,6 +373,7 @@ const G = {
 
     for (const p of this.projectiles) p.update(dt);
     for (const e of this.fx) e.update(dt);
+    for (const s of this.scorch) s.t += dt;
 
     Sectors.checkCaptures();
     this._handleCrewing();
@@ -406,6 +408,8 @@ const G = {
     this.projectiles = this.projectiles.filter(p => p.alive);
     this.fx = this.fx.filter(e => e.alive);
     this.factories = this.factories.filter(f => f.alive);
+    this.scorch = this.scorch.filter(s => s.t < s.life);
+    if (this.scorch.length > 50) this.scorch.splice(0, this.scorch.length - 50);
   },
 
   _checkWin() {
@@ -541,14 +545,23 @@ const G = {
       }
     }
 
+    this._drawScorch(ctx);
     this._drawFlags(ctx);
     this._drawFactories(ctx);
     this._drawForts(ctx);
-    this._drawFx(ctx);
     this._drawProjectiles(ctx);
     this._drawUnits(ctx);
+    this._drawFx(ctx);            // fire/debris/smoke render on top of units
     this._drawSelectionBox(ctx);
     this._drawMinimap(ctx);
+  },
+
+  _drawScorch(ctx) {
+    for (const s of this.scorch) {
+      const a = 0.42 * (1 - s.t / s.life);
+      ctx.fillStyle = `rgba(18,12,8,${a})`;
+      ctx.beginPath(); ctx.ellipse(s.x, s.y, s.r, s.r * 0.62, 0, 0, 7); ctx.fill();
+    }
   },
 
   _teamColor(team) {
@@ -797,14 +810,63 @@ const G = {
     }
   },
 
+  _drawExplosion(ctx, e) {
+    // smoke (drawn first, behind the fire)
+    for (const s of e.smoke) {
+      const st = e.t - s.delay; if (st < 0) continue;
+      const p = st / s.life; if (p > 1) continue;
+      const r = s.r * (0.6 + p * 1.8);
+      ctx.fillStyle = `rgba(70,64,58,${0.34 * (1 - p)})`;
+      ctx.beginPath(); ctx.arc(e.x + s.ox, e.y - st * s.rise, r, 0, 7); ctx.fill();
+      ctx.fillStyle = `rgba(110,100,90,${0.20 * (1 - p)})`;
+      ctx.beginPath(); ctx.arc(e.x + s.ox, e.y - st * s.rise, r * 0.6, 0, 7); ctx.fill();
+    }
+
+    // shockwave ring for big blasts
+    if (e.shock && e.t < 0.18) {
+      const p = e.t / 0.18;
+      ctx.strokeStyle = `rgba(255,230,170,${0.6 * (1 - p)})`; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(e.x, e.y, e.size * (0.6 + p * 1.6), 0, 7); ctx.stroke();
+    }
+
+    // fireball — lumpy, white-hot core fading through orange
+    for (const pf of e.puffs) {
+      const pt = e.t - pf.delay; if (pt < 0) continue;
+      const p = pt / e.fbDur; if (p > 1) continue;
+      const r = pf.r * (0.45 + 0.65 * p), a = 1 - p;
+      let col;
+      if (p < 0.3) col = `rgba(255,255,235,${a})`;
+      else if (p < 0.6) col = `rgba(255,205,70,${a})`;
+      else col = `rgba(225,95,28,${a})`;
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(e.x + pf.ox, e.y + pf.oy, r, 0, 7); ctx.fill();
+    }
+
+    // flying debris (metal chunks + embers), with little shadows
+    for (const d of e.debris) {
+      if (d.t >= d.life) continue;
+      const a = 1 - d.t / d.life;
+      const px = e.x + d.x, py = e.y + d.y;
+      ctx.fillStyle = `rgba(0,0,0,${0.25 * a})`;
+      ctx.fillRect(px - d.s / 2, e.y + Math.max(0, d.y) + 1, d.s, 1);   // ground shadow
+      if (d.hot) {
+        ctx.fillStyle = `rgba(255,${120 + ((a * 120) | 0)},40,${a})`;
+        ctx.beginPath(); ctx.arc(px, py, d.s * 0.7, 0, 7); ctx.fill();
+        ctx.fillStyle = `rgba(255,240,180,${a * 0.8})`;
+        ctx.fillRect(px - 0.5, py - 0.5, 1, 1);
+      } else {
+        ctx.save(); ctx.translate(px, py); ctx.rotate(d.rot);
+        ctx.fillStyle = d.c; ctx.globalAlpha = a;
+        ctx.fillRect(-d.s / 2, -d.s / 2, d.s, d.s);
+        ctx.globalAlpha = 1; ctx.restore();
+      }
+    }
+  },
+
   _drawFx(ctx) {
     for (const e of this.fx) {
       if (e instanceof Explosion) {
-        const f = e.t / e.life;
-        ctx.fillStyle = `rgba(255,${Math.floor(180 * (1 - f))},40,${1 - f})`;
-        ctx.beginPath(); ctx.arc(e.x, e.y, e.r * (0.4 + f), 0, 7); ctx.fill();
-        ctx.fillStyle = `rgba(255,240,180,${(1 - f) * 0.8})`;
-        ctx.beginPath(); ctx.arc(e.x, e.y, e.r * 0.5 * (1 - f), 0, 7); ctx.fill();
+        this._drawExplosion(ctx, e);
       } else if (e instanceof Spark) {
         ctx.fillStyle = e.c; ctx.fillRect(e.x - 2, e.y - 2, 4, 4);
       } else if (e instanceof Tracer) {
