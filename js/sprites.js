@@ -142,6 +142,11 @@ function drawInfantry(g, pal, type, frame) {
     px(g, 2, -1, 5, 3, "#2a2a2a");            // flamer body
     px(g, 7, -1, 2, 3, "#cf5a26");            // nozzle
     px(g, 9, 0, 1, 1, "#ffd24a");
+  } else if (type === "bazooka") {
+    px(g, -2, -2, 3, 2, "#c5532a");           // rear back-blast
+    px(g, 1, -2, 9, 3, "#3a3a3a");            // launcher tube
+    px(g, 10, -2, 2, 3, "#222");              // muzzle
+    px(g, 2, -1, 1, 1, "#ffd24a");
   } else if (big) {
     px(g, 2, -2, 5, 1, "#202020");            // twin barrels
     px(g, 2, 1, 5, 1, "#202020");
@@ -158,13 +163,13 @@ function drawInfantry(g, pal, type, frame) {
  * VEHICLES
  * ========================================================================= */
 function hullSize(type) {
-  return { jeep: 24, light: 28, medium: 32, apc: 30 }[type] || 28;
+  return { jeep: 24, light: 28, medium: 32, apc: 30, rocket: 28 }[type] || 28;
 }
 
 function drawHull(g, pal, type) {
   if (type === "jeep") return drawJeepHull(g, pal);
-  // tanks / apc: tracked hull
-  const dims = { light: [9, 7], medium: [11, 8], apc: [10, 8] }[type];
+  // tanks / apc / rocket rig: tracked hull
+  const dims = { light: [9, 7], medium: [11, 8], apc: [10, 8], rocket: [10, 7] }[type];
   const L = dims[0], W = dims[1];
 
   // tracks (north & south edges)
@@ -224,6 +229,15 @@ function drawTurret(g, pal, type) {
     disc(g, 0, 0, 2.2, pal.main);
     px(g, 2, -1, 6, 2, "#1c1c1c");
     px(g, 0, -1, 2, 1, pal.light);
+    return;
+  }
+  if (type === "rocket") {                           // rocket-tube rack
+    disc(g, -1, 0, 2.4, pal.dark);
+    px(g, -3, -3, 7, 6, pal.metalLo);                // launcher box
+    px(g, -3, -3, 7, 1, pal.light);
+    px(g, -2, -3, 5, 2, pal.main);
+    for (const ty of [-2, 0, 2]) px(g, 3, ty, 7, 1, "#1c1c1c");  // tubes
+    px(g, 9, -2, 1, 1, "#ffd24a"); px(g, 9, 2, 1, 1, "#ffd24a");
     return;
   }
   // tank turret

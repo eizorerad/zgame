@@ -64,7 +64,7 @@ class Commander {
     this.team = team;
     this.tick = 0;
     this.prodTick = 0;
-    this.robotCycle = ["grunt", "grunt", "psycho", "sniper", "grunt", "pyro"];
+    this.robotCycle = ["grunt", "grunt", "bazooka", "psycho", "sniper", "grunt", "pyro", "bazooka"];
     this.robotIdx = 0;
   }
 
@@ -106,8 +106,15 @@ class Commander {
           if (!f._aiType) f._aiType = this.robotCycle[(this.robotIdx++) % this.robotCycle.length];
           f.setQueue(f._aiType);
         } else if (f.ftype === "vehicle") {
-          const want = owners >= 4 ? "medium" : owners >= 2 ? "light" : "jeep";
-          if (f.queueKey !== want && f.buildFraction() < 0.25) f.setQueue(want);
+          // pick a stable per-plant role so the army stays mixed (tanks +
+          // some rocket arty + harassers) instead of one spammed type
+          if (!f._aiType) {
+            const r = Math.random();
+            f._aiType = owners >= 4 ? (r < 0.4 ? "medium" : r < 0.7 ? "rocket" : "light")
+                      : owners >= 2 ? (r < 0.45 ? "light" : r < 0.7 ? "rocket" : "jeep")
+                      : (r < 0.6 ? "jeep" : "light");
+          }
+          if (f.queueKey !== f._aiType && f.buildFraction() < 0.25) f.setQueue(f._aiType);
         } else if (f.ftype === "gun") {
           f.setQueue("pillbox");
         }

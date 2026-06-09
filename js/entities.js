@@ -86,6 +86,8 @@ class Unit {
     return this.stats.dmg * (1 + this.rank * VET.dmgPerRank) * (1 + lvl * CFG.UPGRADE_STEP);
   }
   get fireCooldown() { return this.stats.cooldown * (1 + this.rank * VET.cooldownPerRank); }
+  get cls() { return this.stats.cls; }          // armour class (how it takes hits)
+  get dtype() { return this.stats.dtype; }       // damage type (what its weapon deals)
 
   isVehicle() { return this.kind === "machine" && !this.immobile; }
   isGun() { return this.kind === "machine" && this.immobile; }
@@ -316,6 +318,9 @@ class Unit {
   /* ---- damage -------------------------------------------------------- */
   applyDamage(amount, attacker, sniperKill) {
     if (!this.alive) return;
+    // counter system: damage-type vs this unit's armour class
+    const dty = attacker && attacker.dtype;
+    if (dty && DMG_MULT[dty]) amount *= (DMG_MULT[dty][this.cls] ?? 1);
     // defence upgrades reduce incoming damage
     const up = G.upgrades && G.upgrades[this.team];
     if (up) { const lvl = this.kind === "infantry" ? up.infDef : up.vehDef; amount = amount / (1 + lvl * CFG.UPGRADE_STEP); }

@@ -113,49 +113,65 @@ const VET = {
   cooldownPerRank: -0.05,            // faster firing
 };
 
+/* ---- combat counter system (armour class vs damage type) ----------------
+ * Each unit has an armour CLASS (how it takes hits) and its weapon deals a
+ * damage TYPE. The multiplier table below creates rock-paper-scissors roles.
+ * ------------------------------------------------------------------------- */
+const DMG_MULT = {
+  bullet: { soft: 1.5, light: 0.7,  heavy: 0.35 },   // rifles: anti-infantry
+  flame:  { soft: 1.8, light: 0.9,  heavy: 0.4  },   // flamer: shreds infantry
+  snipe:  { soft: 1.6, light: 0.55, heavy: 0.3  },   // sniper: anti-personnel (+crew kills)
+  cannon: { soft: 0.6, light: 1.3,  heavy: 1.2  },   // tank gun: anti-vehicle
+  rocket: { soft: 0.8, light: 1.5,  heavy: 1.7  },   // rockets: anti-armour
+};
+
 /* ---- Infantry types ----------------------------------------------------- */
 const INFANTRY_TYPES = {
-  grunt:  { name: "Grunt",  baseTime: 8,  hp: 30,  speed: 46, range: 70,  dmg: 6,  cooldown: 0.45, radius: 5, aggro: 120 },
-  psycho: { name: "Psycho", baseTime: 14, hp: 55,  speed: 58, range: 40,  dmg: 16, cooldown: 0.30, radius: 6, aggro: 170 },
-  sniper: { name: "Sniper", baseTime: 18, hp: 24,  speed: 40, range: 155, dmg: 10, cooldown: 1.3,  radius: 5, aggro: 195, snipeChance: 0.35 },
-  pyro:   { name: "Pyro",   baseTime: 16, hp: 40,  speed: 48, range: 55,  dmg: 22, cooldown: 0.5,  radius: 6, aggro: 130 },
+  grunt:   { name: "Grunt",   baseTime: 8,  hp: 32, speed: 46, range: 70,  dmg: 6,  cooldown: 0.45, radius: 5, aggro: 120, cls: "soft", dtype: "bullet" },
+  psycho:  { name: "Psycho",  baseTime: 14, hp: 60, speed: 60, range: 38,  dmg: 14, cooldown: 0.28, radius: 6, aggro: 170, cls: "soft", dtype: "bullet" },
+  sniper:  { name: "Sniper",  baseTime: 18, hp: 24, speed: 40, range: 160, dmg: 12, cooldown: 1.4,  radius: 5, aggro: 200, cls: "soft", dtype: "snipe", snipeChance: 0.4 },
+  pyro:    { name: "Pyro",    baseTime: 16, hp: 44, speed: 48, range: 52,  dmg: 20, cooldown: 0.5,  radius: 6, aggro: 130, cls: "soft", dtype: "flame" },
+  bazooka: { name: "Bazooka", baseTime: 17, hp: 26, speed: 38, range: 135, dmg: 28, cooldown: 1.5,  radius: 5, aggro: 190, cls: "soft", dtype: "rocket" },
 };
 
 /* ---- Vehicle types ------------------------------------------------------ */
 const VEHICLE_TYPES = {
-  jeep:    { name: "Jeep",       baseTime: 20, armour: 60,  speed: 82, range: 95,  dmg: 8,  cooldown: 0.35, radius: 9,  aggro: 150 },
-  light:   { name: "Light Tank", baseTime: 35, armour: 130, speed: 56, range: 115, dmg: 18, cooldown: 0.9,  radius: 12, aggro: 175 },
-  medium:  { name: "Med Tank",   baseTime: 60, armour: 230, speed: 44, range: 135, dmg: 32, cooldown: 1.2,  radius: 14, aggro: 195 },
-  apc:     { name: "APC",        baseTime: 30, armour: 160, speed: 64, range: 80,  dmg: 7,  cooldown: 0.4,  radius: 13, aggro: 150 },
+  jeep:   { name: "Jeep",       baseTime: 20, armour: 70,  speed: 82, range: 95,  dmg: 9,  cooldown: 0.35, radius: 9,  aggro: 150, cls: "light", dtype: "bullet" },
+  light:  { name: "Light Tank", baseTime: 35, armour: 150, speed: 56, range: 115, dmg: 18, cooldown: 0.9,  radius: 12, aggro: 175, cls: "heavy", dtype: "cannon" },
+  medium: { name: "Med Tank",   baseTime: 60, armour: 240, speed: 44, range: 135, dmg: 30, cooldown: 1.2,  radius: 14, aggro: 195, cls: "heavy", dtype: "cannon" },
+  apc:    { name: "APC",        baseTime: 30, armour: 180, speed: 64, range: 80,  dmg: 7,  cooldown: 0.4,  radius: 13, aggro: 150, cls: "light", dtype: "bullet" },
+  rocket: { name: "Rocket Rig", baseTime: 45, armour: 55,  speed: 50, range: 185, dmg: 38, cooldown: 1.7,  radius: 11, aggro: 205, cls: "light", dtype: "rocket" },
 };
 
 /* ---- Gun emplacements (built by gun factories, immobile) ---------------- */
 const GUN_TYPES = {
-  pillbox: { name: "Pillbox", baseTime: 30, armour: 200, speed: 0, range: 165, dmg: 24, cooldown: 0.85, radius: 12, aggro: 210, immobile: true },
+  pillbox: { name: "Pillbox", baseTime: 30, armour: 200, speed: 0, range: 165, dmg: 22, cooldown: 0.85, radius: 12, aggro: 210, immobile: true, cls: "heavy", dtype: "cannon" },
 };
 
 const FACTORY_OUTPUT = {
-  robot:   { table: INFANTRY_TYPES, kind: "infantry", keys: ["grunt", "psycho", "sniper", "pyro"] },
-  vehicle: { table: VEHICLE_TYPES,  kind: "vehicle",  keys: ["jeep", "light", "medium", "apc"] },
+  robot:   { table: INFANTRY_TYPES, kind: "infantry", keys: ["grunt", "psycho", "bazooka", "sniper", "pyro"] },
+  vehicle: { table: VEHICLE_TYPES,  kind: "vehicle",  keys: ["jeep", "light", "medium", "rocket", "apc"] },
   gun:     { table: GUN_TYPES,      kind: "gun",      keys: ["pillbox"] },
 };
 
 // short RTS-style flavour notes shown in the factory popup
 const UNIT_NOTES = {
-  grunt:  "Cheap rifleman. Win with numbers.",
-  psycho: "Reckless brawler, lethal up close.",
-  sniper: "Long range. Kills vehicle crews.",
-  pyro:   "Short-range flamer. Melts groups.",
-  jeep:   "Fast scout with a mounted gun.",
-  light:  "Light tank. Mobile armour.",
-  medium: "Heavy armour, slow, big punch.",
-  apc:    "Tough transport, light gun.",
-  pillbox:"Immobile gun nest. Pure defence.",
+  grunt:  "Cheap rifle. Anti-infantry; weak vs armour.",
+  psycho: "Fast brawler. Shreds infantry up close.",
+  sniper: "Anti-personnel. Snipes vehicle crews.",
+  pyro:   "Flamer. Melts infantry; weak vs tanks.",
+  bazooka:"Anti-tank infantry. Fragile — keep it back.",
+  jeep:   "Fast harasser vs infantry. Paper armour.",
+  light:  "Cannon. Beats light vehicles; poor vs infantry.",
+  medium: "Heavy cannon. Costly; crew can be sniped.",
+  apc:    "Tough screen, weak gun. Shields rockets.",
+  rocket: "Rocket arty. Long-range glass cannon — screen it!",
+  pillbox:"Immobile cannon nest. Pure defence.",
 };
 
 // HQ (Fort) command-panel options
-const FORT_TRAIN_KEYS = ["grunt", "psycho", "sniper", "pyro", "jeep", "light", "medium", "apc"];
-const INSTANT_KEYS    = ["grunt", "psycho", "sniper", "pyro", "jeep", "light", "medium", "apc", "pillbox"];
+const FORT_TRAIN_KEYS = ["grunt", "psycho", "bazooka", "sniper", "pyro", "jeep", "light", "medium", "rocket", "apc"];
+const INSTANT_KEYS    = ["grunt", "psycho", "bazooka", "sniper", "pyro", "jeep", "light", "medium", "rocket", "apc", "pillbox"];
 const UPGRADE_DEFS = [
   { key: "infAtk", name: "Inf Atk" },
   { key: "infDef", name: "Inf Def" },
