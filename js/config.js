@@ -41,6 +41,11 @@ const CFG = {
   // Tanks crush enemy infantry they roll over
   CRUSH_DMG: 999,
 
+  // Population cap per team. Continuous (free, time-based) production pauses
+  // at the cap so unit counts stay bounded — this keeps the per-frame work
+  // (O(n^2) target scans / crewing / crushing) from exploding in long games.
+  MAX_POP: 70,
+
   // ---- HQ mana economy (defensive comeback) ----
   MANA_MAX: 260,
   MANA_REGEN: 1.4,          // per second, passive

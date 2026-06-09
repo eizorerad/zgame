@@ -400,6 +400,7 @@ class Factory {
 
   update(dt) {
     if (this.team === TEAM.NEUTRAL) return;
+    if (G.atPopCap(this.team)) return;          // hold production at the population cap
     const base = this.spec.table[this.queueKey].baseTime;
     const actual = G.actualBuildTime(base, this.team);
     this.progress += dt;
@@ -465,8 +466,8 @@ class Fort {
         foe.applyDamage(CFG.FORT_TURRET_DMG, this, false);
       }
     }
-    // time-based training of the selected unit
-    if (this.trainKey) {
+    // time-based training of the selected unit (paused at the population cap)
+    if (this.trainKey && !G.atPopCap(this.team)) {
       this.trainProgress += dt;
       if (this.trainProgress >= G.actualBuildTime(G.baseTimeOf(this.trainKey), this.team)) {
         this.trainProgress = 0;

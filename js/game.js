@@ -91,6 +91,9 @@ const G = {
   unitName(type) { return (INFANTRY_TYPES[type] || VEHICLE_TYPES[type] || GUN_TYPES[type]).name; },
   manaCost(type) { return Math.round(this.baseTimeOf(type) * 1.3); },
 
+  // true when a team is at its population cap (continuous production pauses)
+  atPopCap(team) { return this._pop ? this._pop[team] >= CFG.MAX_POP : false; },
+
   // spend mana to instantly spawn a unit at the team's HQ
   instantBuild(team, type) {
     const cost = this.manaCost(type);
@@ -486,6 +489,10 @@ const G = {
     this.dt = dt;
     this.time += dt;
     this._updateCamera(dt);
+
+    // per-frame population count (used for the production cap — O(1) lookups)
+    this._pop = { blue: 0, red: 0 };
+    for (const u of this.units) if (u.alive && u.crewed) this._pop[u.team]++;
 
     // passive mana regen for both HQs (capped)
     this.mana.blue = Math.min(CFG.MANA_MAX, this.mana.blue + CFG.MANA_REGEN * dt);
