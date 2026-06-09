@@ -233,9 +233,12 @@ const G = {
   },
 
   start() {
+    if (this._looping) return;        // never stack more than one animation loop
+    this._looping = true;
     this.running = true;
     this.last = performance.now();
-    requestAnimationFrame(this._frame.bind(this));
+    this._frameBound = this._frame.bind(this);
+    requestAnimationFrame(this._frameBound);
   },
 
   /* ---- world generation ---------------------------------------------- */
@@ -469,7 +472,7 @@ const G = {
     this.dt = dt;
     this._update(dt);
     this._render();
-    requestAnimationFrame(this._frame.bind(this));
+    requestAnimationFrame(this._frameBound);
   },
 
   _updateCamera(dt) {
@@ -720,17 +723,31 @@ const G = {
     }
   },
 
+  // is a world point within (a margin of) the visible viewport?
+  _inView(x, y, m = 52) {
+    return x > this.cam.x - m && x < this.cam.x + CFG.VIEW_W + m
+        && y > this.cam.y - m && y < this.cam.y + CFG.VIEW_H + m;
+  },
+
   _render() {
     const ctx = this.ctx, T = CFG.TILE;
+    const cx = Math.round(this.cam.x), cy = Math.round(this.cam.y);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, CFG.VIEW_W, CFG.VIEW_H);
-    // ---- world pass: everything below is drawn through the camera ----
+    // ---- world pass: only the visible slice is drawn ----
     ctx.save();
-    ctx.translate(-Math.round(this.cam.x), -Math.round(this.cam.y));
-    ctx.drawImage(this.bg, 0, 0);
+    ctx.translate(-cx, -cy);
+    ctx.drawImage(this.bg, cx, cy, CFG.VIEW_W, CFG.VIEW_H, cx, cy, CFG.VIEW_W, CFG.VIEW_H);
 
-    // sector ownership tint over the irregular regions (borders are baked)
-    const fillRuns = (s, style) => { ctx.fillStyle = style; for (const r of s.runs) ctx.fillRect(r.x0 * T, r.y * T, (r.x1 - r.x0 + 1) * T, T); };
+    const vx0 = cx - T, vx1 = cx + CFG.VIEW_W, vy0 = cy - T, vy1 = cy + CFG.VIEW_H;
+    // sector ownership tint over the irregular regions (visible runs only)
+    const fillRuns = (s, style) => {
+      ctx.fillStyle = style;
+      for (const r of s.runs) {
+        const ry = r.y * T; if (ry > vy1 || ry + T < vy0) continue;
+        const rx = r.x0 * T, rw = (r.x1 - r.x0 + 1) * T; if (rx > vx1 || rx + rw < vx0) continue;
+        ctx.fillRect(rx, ry, rw, T);
+      }
+    };
     for (const s of this.sectors) {
       const col = s.owner === TEAM.BLUE ? "77,166,255" : s.owner === TEAM.RED ? "255,91,91" : "150,150,150";
       fillRuns(s, `rgba(${col},${s.owner === TEAM.NEUTRAL ? 0.05 : 0.12})`);
@@ -741,13 +758,14 @@ const G = {
       if (s.flash > 0) fillRuns(s, `rgba(${col},${0.25 * s.flash})`);
     }
 
-    // destructible sandbag walls (dynamic — show wear as they take damage)
+    // destructible sandbag walls (visible only)
     for (const [k, hp] of this.walls) {
       const x = (k % CFG.COLS) * T, y = Math.floor(k / CFG.COLS) * T;
+      if (x > vx1 || x + T < vx0 || y > vy1 || y + T < vy0) continue;
       const dmg = Util.clamp(hp / 60, 0, 1);
       ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.fillRect(x + 2, y + T - 3, T - 2, 3);
       for (let r = 0; r < 3; r++) for (let cc = 0; cc < 3; cc++) {
-        if ((r * 3 + cc) / 9 > dmg) continue;            // bags blown away as HP drops
+        if ((r * 3 + cc) / 9 > dmg) continue;
         ctx.fillStyle = (r + cc) & 1 ? CFG.COLORS.wall : CFG.COLORS.wallLo;
         ctx.fillRect(x + cc * 5 + 1, y + r * 5 + 1, 5, 5);
         ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fillRect(x + cc * 5 + 1, y + r * 5 + 4, 5, 1);
@@ -791,7 +809,7 @@ const G = {
 
   _drawOrders(ctx) {
     for (const u of this.units) {
-      if (!u.selected || !u.alive) continue;
+      if (!u.selected || !u.alive || !this._inView(u.x, u.y, 600)) continue;
       if (u.commandAttack && u.commandAttack.alive) {
         PX.line(ctx, u.x, u.y, u.commandAttack.x, u.commandAttack.y, "rgba(255,91,91,0.35)", 2, 2);
       } else if (u.moveGoalX != null) {
@@ -824,6 +842,7 @@ const G = {
 
   _drawScorch(ctx) {
     for (const s of this.scorch) {
+      if (!this._inView(s.x, s.y)) continue;
       const a = 0.42 * (1 - s.t / s.life);
       PX.fillOval(ctx, s.x, s.y, s.r, s.r * 0.62, `rgba(18,12,8,${a})`, 2);
     }
@@ -838,7 +857,7 @@ const G = {
 
   _drawFlags(ctx) {
     for (const s of this.sectors) {
-      const f = s.flag; if (!f) continue;
+      const f = s.flag; if (!f || !this._inView(f.x, f.y)) continue;
       ctx.fillStyle = "#2a2a2a"; ctx.fillRect(f.x - 1, f.y - 14, 2, 18);   // pole
       // stepped pennant (pixel triangle)
       ctx.fillStyle = this._teamColor(s.owner);
@@ -858,6 +877,7 @@ const G = {
 
   _drawFactories(ctx) {
     for (const f of this.factories) {
+      if (!this._inView(f.x, f.y, 60)) continue;
       const palTeam = f.team === TEAM.BLUE ? "blue" : f.team === TEAM.RED ? "red" : "neutral";
       const img = Sprites.building(f.ftype, palTeam);
       const bx = Math.round(f.x - img.width / 2), by = Math.round(f.y - img.height / 2 - 4);
@@ -906,6 +926,7 @@ const G = {
 
   _drawForts(ctx) {
     for (const f of this.forts) {
+      if (!this._inView(f.x, f.y, f.w)) continue;
       const x = Math.round(f.x - f.w / 2), y = Math.round(f.y - f.h / 2);
       const W = f.w, H = f.h, main = this._teamColor(f.team), dark = this._teamDark(f.team);
 
@@ -981,6 +1002,7 @@ const G = {
 
   _drawUnits(ctx) {
     for (const u of this.units) {
+      if (!this._inView(u.x, u.y)) continue;
       const palTeam = u.team === TEAM.BLUE ? "blue" : u.team === TEAM.RED ? "red" : "neutral";
 
       // soft shadow (pixel oval)
@@ -1121,6 +1143,7 @@ const G = {
 
   _drawProjectiles(ctx) {
     for (const p of this.projectiles) {
+      if (!this._inView(p.x, p.y)) continue;
       if (p.sniper) {
         PX.line(ctx, p.x, p.y, p.x - (p.tx - p.x) * 0.05, p.y - (p.ty - p.y) * 0.05, "#fff", 2, 2);
       } else {
@@ -1177,6 +1200,8 @@ const G = {
 
   _drawFx(ctx) {
     for (const e of this.fx) {
+      const ex = e.x !== undefined ? e.x : e.x1, ey = e.y !== undefined ? e.y : e.y1;
+      if (!this._inView(ex, ey, 60)) continue;
       if (e instanceof Explosion) {
         this._drawExplosion(ctx, e);
       } else if (e instanceof Spark) {
