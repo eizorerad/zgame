@@ -28,27 +28,35 @@ const Input = {
   attackMoveArmed: false,     // 'A' pressed, waiting for the target click
   hover: { kind: "move" },    // what a right-click would do at the cursor
 
+  keys: new Set(),
+  popupRects: [],             // clickable unit rows in the factory popup (screen space)
+
   init(canvas) {
     this.canvas = canvas;
+    this.mouse = { x: 0, y: 0, in: false };
     canvas.style.cursor = "none";   // we draw our own cursor
 
     canvas.addEventListener("contextmenu", e => e.preventDefault());
 
     canvas.addEventListener("mousedown", e => {
-      const p = this._pt(e); this.mouse = p;
+      const p = this._pt(e); this.mouse.x = p.x; this.mouse.y = p.y; this.mouse.in = true;
       if (e.button === 0) {
-        if (this.attackMoveArmed) { this._issueAttackMove(p); this.attackMoveArmed = false; return; }
+        if (this._minimapClick(p)) return;            // jump the camera
+        if (this._popupClick(p)) return;              // pick a unit in the factory popup
+        if (this.attackMoveArmed) { this._issueAttackMove(this.world(p)); this.attackMoveArmed = false; return; }
         this.drag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive: e.shiftKey };
       } else if (e.button === 2) {
-        this._rightClick(p, e);
+        this._rightClick(this.world(p), e);
       }
     });
 
     canvas.addEventListener("mousemove", e => {
-      const p = this._pt(e); this.mouse = p;
+      const p = this._pt(e); this.mouse.x = p.x; this.mouse.y = p.y; this.mouse.in = true;
       if (this.drag) { this.drag.x1 = p.x; this.drag.y1 = p.y; }
-      this._updateHover(p, e);
+      this._updateHover(this.world(p), e);
     });
+
+    canvas.addEventListener("mouseleave", () => { this.mouse.in = false; });
 
     window.addEventListener("mouseup", e => {
       if (e.button === 0 && this.drag) { this._leftRelease(this.drag); this.drag = null; }
@@ -56,17 +64,41 @@ const Input = {
 
     window.addEventListener("keydown", e => {
       const k = e.key.toLowerCase();
+      this.keys.add(k);
       if (k === "a") this.attackMoveArmed = !this.attackMoveArmed;
       else if (k === "h") { this._forSelected(u => u.orderHold()); this.attackMoveArmed = false; }
       else if (k === "s") { this._forSelected(u => u.stop()); this.attackMoveArmed = false; }
       else if (k === "escape") { this._clearSelection(); this.selectedFactory = null; this.selectedFort = null; this.attackMoveArmed = false; UI.refreshFactoryPanel(); }
     });
+    window.addEventListener("keyup", e => this.keys.delete(e.key.toLowerCase()));
   },
 
   _pt(e) {
     const r = this.canvas.getBoundingClientRect();
     const sx = this.canvas.width / r.width, sy = this.canvas.height / r.height;
     return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
+  },
+
+  // screen -> world coordinate (account for the camera)
+  world(p) { return { x: p.x + G.cam.x, y: p.y + G.cam.y }; },
+
+  // clicking the minimap recentres the camera there
+  _minimapClick(p) {
+    const mm = G.mm;
+    if (!mm || p.x < mm.ox || p.x > mm.ox + mm.w || p.y < mm.oy || p.y > mm.oy + mm.h) return false;
+    G.centerCam((p.x - mm.ox) / mm.w * G.worldW(), (p.y - mm.oy) / mm.h * G.worldH());
+    return true;
+  },
+
+  // clicking a row in the factory popup sets that factory's production
+  _popupClick(p) {
+    if (!this.selectedFactory) return false;
+    for (const r of this.popupRects) {
+      if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
+        this.selectedFactory.setQueue(r.key); return true;
+      }
+    }
+    return false;
   },
 
   hasSelection() { return G.units.some(u => u.selected && u.alive); },
@@ -77,8 +109,8 @@ const Input = {
     if (w < 5 && h < 5) { this._click(d); return; }
 
     if (!d.additive) this._clearSelection();
-    const x0 = Math.min(d.x0, d.x1), x1 = Math.max(d.x0, d.x1);
-    const y0 = Math.min(d.y0, d.y1), y1 = Math.max(d.y0, d.y1);
+    const x0 = Math.min(d.x0, d.x1) + G.cam.x, x1 = Math.max(d.x0, d.x1) + G.cam.x;
+    const y0 = Math.min(d.y0, d.y1) + G.cam.y, y1 = Math.max(d.y0, d.y1) + G.cam.y;
     for (const u of G.units) {
       if (!u.alive || u.team !== G.player || !u.crewed) continue;
       if (u.x >= x0 && u.x <= x1 && u.y >= y0 && u.y <= y1) u.selected = true;
@@ -88,7 +120,7 @@ const Input = {
   },
 
   _click(d) {
-    const p = { x: d.x1, y: d.y1 };
+    const p = this.world({ x: d.x1, y: d.y1 });
     // your own HQ? open the command panel
     const fort = G.fortAt(p.x, p.y);
     if (fort && fort.team === G.player) {

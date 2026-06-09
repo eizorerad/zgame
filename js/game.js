@@ -16,6 +16,7 @@ const G = {
   walls: new Map(),         // key -> hp  (destructible sandbags)
   terrain: null,            // Uint8Array of TERR.* values
   decor: [],                // non-blocking scenery (cacti, etc.)
+  cam: { x: 0, y: 0 },      // camera (world px) — the map is larger than the viewport
   mana: { blue: 0, red: 0 },                                   // HQ comeback economy
   upgrades: { blue: { infAtk: 0, infDef: 0, vehAtk: 0, vehDef: 0 },
               red:  { infAtk: 0, infDef: 0, vehAtk: 0, vehDef: 0 } },
@@ -179,10 +180,18 @@ const G = {
   },
 
   /* ===================================================================== */
+  worldW() { return CFG.COLS * CFG.TILE; },
+  worldH() { return CFG.ROWS * CFG.TILE; },
+  clampCam() {
+    this.cam.x = Util.clamp(this.cam.x, 0, Math.max(0, this.worldW() - CFG.VIEW_W));
+    this.cam.y = Util.clamp(this.cam.y, 0, Math.max(0, this.worldH() - CFG.VIEW_H));
+  },
+  centerCam(x, y) { this.cam.x = x - CFG.VIEW_W / 2; this.cam.y = y - CFG.VIEW_H / 2; this.clampCam(); },
+
   init() {
     const canvas = document.getElementById("game");
-    canvas.width = CFG.COLS * CFG.TILE;
-    canvas.height = CFG.ROWS * CFG.TILE;
+    canvas.width = CFG.VIEW_W;
+    canvas.height = CFG.VIEW_H;
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
     this.ctx.imageSmoothingEnabled = false;
@@ -194,6 +203,9 @@ const G = {
     this._buildWorld();
     this._cacheBackground();
 
+    const bf = this.forts.find(f => f.team === TEAM.BLUE);
+    if (bf) this.centerCam(bf.x, bf.y);
+
     this.commander = new Commander(TEAM.RED);
 
     UI.showOverlay(
@@ -204,6 +216,7 @@ const G = {
       "• Right-click the ground to MOVE (your units go through, only firing point-blank)\n" +
       "• Right-click an enemy to ATTACK it; right-click an enemy/neutral flag to CAPTURE that sector\n" +
       "• Press A then click to ATTACK-MOVE (advance and engage everything on the way)\n" +
+      "• The map is larger than the screen — scroll with the arrow keys, the screen edges, or by clicking the minimap\n" +
       "• H = hold position, S = stop, Esc = deselect\n" +
       "• Click your factory to choose what it builds; right-click to set its rally point\n\n" +
       "The cursor tells you which order a right-click will give. Hold sectors to build faster, " +
@@ -456,10 +469,25 @@ const G = {
     requestAnimationFrame(this._frame.bind(this));
   },
 
+  _updateCamera(dt) {
+    const sp = 520 * dt, k = Input.keys, m = Input.mouse, edge = 26;
+    let dx = 0, dy = 0;
+    if (k.has("a") || k.has("arrowleft")) dx -= 1;
+    if (k.has("d") || k.has("arrowright")) dx += 1;
+    if (k.has("w") || k.has("arrowup")) dy -= 1;
+    if (k.has("s") || k.has("arrowdown")) dy += 1;
+    if (m.in) {                                  // mouse-at-edge scrolling
+      if (m.x < edge) dx -= 1; else if (m.x > CFG.VIEW_W - edge) dx += 1;
+      if (m.y < edge) dy -= 1; else if (m.y > CFG.VIEW_H - edge) dy += 1;
+    }
+    if (dx || dy) { this.cam.x += dx * sp; this.cam.y += dy * sp; this.clampCam(); }
+  },
+
   _update(dt) {
     if (this.over) return;
     this.dt = dt;
     this.time += dt;
+    this._updateCamera(dt);
 
     // passive mana regen for both HQs (capped)
     this.mana.blue = Math.min(CFG.MANA_MAX, this.mana.blue + CFG.MANA_REGEN * dt);
@@ -554,7 +582,7 @@ const G = {
   /* ===================================================================== */
   _cacheBackground() {
     const bg = document.createElement("canvas");
-    bg.width = this.canvas.width; bg.height = this.canvas.height;
+    bg.width = this.worldW(); bg.height = this.worldH();
     const c = bg.getContext("2d"); c.imageSmoothingEnabled = false;
     const T = CFG.TILE, K = CFG.COLORS;
     const at = (x, y) => (this._inBounds(x, y) ? this.terrain[this.tkey(x, y)] : TERR.SAND);
@@ -689,6 +717,11 @@ const G = {
 
   _render() {
     const ctx = this.ctx, T = CFG.TILE;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, CFG.VIEW_W, CFG.VIEW_H);
+    // ---- world pass: everything below is drawn through the camera ----
+    ctx.save();
+    ctx.translate(-Math.round(this.cam.x), -Math.round(this.cam.y));
     ctx.drawImage(this.bg, 0, 0);
 
     // sector ownership tint over the irregular regions (borders are baked)
@@ -724,7 +757,10 @@ const G = {
     this._drawUnits(ctx);
     this._drawOrders(ctx);       // faint lines from selected units to their goal
     this._drawFx(ctx);           // fire/debris/smoke render on top of units
+    ctx.restore();
+    // ---- screen-space HUD (not affected by the camera) ----
     this._drawSelectionBox(ctx);
+    this._drawFactoryPopup(ctx); // unit-select popup above the selected factory
     this._drawMinimap(ctx);
     this._drawCursor(ctx);       // context-sensitive cursor, drawn last
   },
@@ -972,10 +1008,69 @@ const G = {
     }
   },
 
+  // draw a unit's sprite, scaled to ~icon size, centred at (cx,cy)
+  _unitIcon(ctx, key, cx, cy) {
+    const team = "blue", dir = 2;          // facing the camera (south)
+    const blit = (img) => { if (!img) return; const s = 18 / img.width; ctx.drawImage(img, Math.round(cx - img.width * s / 2), Math.round(cy - img.height * s / 2), Math.round(img.width * s), Math.round(img.height * s)); };
+    if (INFANTRY_TYPES[key]) blit(Sprites.infantry(key, team, dir, 0));
+    else if (key === "pillbox") { blit(Sprites.gunBase(team)); blit(Sprites.gunTurret(team, dir)); }
+    else { blit(Sprites.hull(key, team, dir)); blit(Sprites.turret(key, team, dir)); }
+  },
+
+  // RTS-style popup above the selected factory: pick the unit to build, with
+  // its sprite, stats and a short note.
+  _drawFactoryPopup(ctx) {
+    Input.popupRects = [];
+    const f = Input.selectedFactory;
+    if (!f) return;
+    const keys = f.spec.keys, rowH = 20, W = 184, headH = 16, detailH = 30;
+    const H = headH + keys.length * rowH + detailH + 6;
+    const fsx = f.x - this.cam.x, fsy = f.y - this.cam.y;
+    let px = Util.clamp(Math.round(fsx - W / 2), 4, CFG.VIEW_W - W - 4);
+    let py = Math.round(fsy - 34 - H);
+    if (py < 4) py = Math.round(fsy + 34);
+    py = Util.clamp(py, 4, CFG.VIEW_H - H - 4);
+
+    ctx.fillStyle = "rgba(10,12,16,0.93)"; ctx.fillRect(px, py, W, H);
+    ctx.fillStyle = "#2b3a44"; ctx.fillRect(px, py, W, 2); ctx.fillRect(px, py + H - 2, W, 2); ctx.fillRect(px, py, 2, H); ctx.fillRect(px + W - 2, py, 2, H);
+    ctx.fillStyle = "#e8d98a"; ctx.font = "bold 10px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText(f.ftype.toUpperCase() + " FACTORY", px + 8, py + headH / 2 + 1);
+
+    const m = Input.mouse; let hover = -1, yy = py + headH;
+    keys.forEach((key, i) => {
+      const rx = px + 4, ry = yy + 1, rw = W - 8, rh = rowH - 2;
+      const over = m.in && m.x >= rx && m.x <= rx + rw && m.y >= ry && m.y <= ry + rh;
+      if (over) hover = i;
+      const active = f.queueKey === key;
+      ctx.fillStyle = active ? "rgba(77,166,255,0.30)" : over ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.03)";
+      ctx.fillRect(rx, ry, rw, rh);
+      if (active) { ctx.fillStyle = "#4da6ff"; ctx.fillRect(rx, ry, 2, rh); }
+      this._unitIcon(ctx, key, rx + 12, ry + rh / 2);
+      ctx.fillStyle = active ? "#cfe3ff" : "#cfd6dc"; ctx.font = "9px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(G.unitName(key), rx + 24, ry + rh / 2);
+      ctx.fillStyle = "#86d68a"; ctx.textAlign = "right"; ctx.fillText(G.baseTimeOf(key) + "s", rx + rw - 4, ry + rh / 2); ctx.textAlign = "left";
+      Input.popupRects.push({ key, x: rx, y: ry, w: rw, h: rh });
+      yy += rowH;
+    });
+
+    // detail box: stats + note for the hovered (or selected) unit
+    const dkey = hover >= 0 ? keys[hover] : f.queueKey;
+    const st = INFANTRY_TYPES[dkey] || VEHICLE_TYPES[dkey] || GUN_TYPES[dkey];
+    const dy0 = py + headH + keys.length * rowH + 2;
+    ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fillRect(px + 4, dy0, W - 8, detailH);
+    ctx.font = "8px monospace"; ctx.textAlign = "left";
+    ctx.fillStyle = "#ffd24a";
+    const hp = st.hp !== undefined ? `HP ${st.hp}` : `ARM ${st.armour}`;
+    ctx.fillText(`${hp}  DMG ${st.dmg}  RNG ${st.range}  SPD ${st.speed}`, px + 8, dy0 + 9);
+    ctx.fillStyle = "#9fb0c0";
+    ctx.fillText(UNIT_NOTES[dkey] || "", px + 8, dy0 + 21);
+  },
+
   _drawMinimap(ctx) {
-    const mw = 150, mh = mw * CFG.ROWS / CFG.COLS;
+    const mw = 168, mh = Math.round(mw * CFG.ROWS / CFG.COLS);
     const ox = this.canvas.width - mw - 8, oy = 8;
-    const sx = mw / (CFG.COLS * CFG.TILE), sy = mh / (CFG.ROWS * CFG.TILE);
+    const sx = mw / this.worldW(), sy = mh / this.worldH();
+    this.mm = { ox, oy, w: mw, h: mh };              // remembered for click-to-pan
     ctx.fillStyle = "rgba(8,10,12,0.85)"; ctx.fillRect(ox - 2, oy - 2, mw + 4, mh + 4);
     // sectors (irregular regions via fill runs)
     const T = CFG.TILE;
@@ -995,7 +1090,10 @@ const G = {
       ctx.fillStyle = this._teamColor(u.team);
       ctx.fillRect(ox + u.x * sx - 0.5, oy + u.y * sy - 0.5, u.kind === "machine" ? 2 : 1.4, u.kind === "machine" ? 2 : 1.4);
     }
-    ctx.strokeStyle = "#2b3a44"; ctx.lineWidth = 1; ctx.strokeRect(ox - 2, oy - 2, mw + 4, mh + 4);
+    // camera viewport rectangle
+    ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1;
+    ctx.strokeRect(ox + this.cam.x * sx, oy + this.cam.y * sy, CFG.VIEW_W * sx, CFG.VIEW_H * sy);
+    ctx.strokeStyle = "#2b3a44"; ctx.strokeRect(ox - 2, oy - 2, mw + 4, mh + 4);
   },
 
   _bar(ctx, cx, y, w, frac, col) {

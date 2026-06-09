@@ -5,8 +5,10 @@
 
 const CFG = {
   TILE: 16,            // pixel size of one grid tile
-  COLS: 64,            // map width  in tiles
-  ROWS: 40,            // map height in tiles
+  COLS: 92,            // map width  in tiles (~2x the old area)
+  ROWS: 56,            // map height in tiles
+  VIEW_W: 1024,        // on-screen viewport (the world is larger; camera pans)
+  VIEW_H: 640,
 
   // Production: Actual = Base / (1 + sectorsOwned * MULT)
   SECTOR_SPEED_MULT: 0.18,
@@ -131,6 +133,19 @@ const FACTORY_OUTPUT = {
   robot:   { table: INFANTRY_TYPES, kind: "infantry", keys: ["grunt", "psycho", "sniper", "pyro"] },
   vehicle: { table: VEHICLE_TYPES,  kind: "vehicle",  keys: ["jeep", "light", "medium", "apc"] },
   gun:     { table: GUN_TYPES,      kind: "gun",      keys: ["pillbox"] },
+};
+
+// short RTS-style flavour notes shown in the factory popup
+const UNIT_NOTES = {
+  grunt:  "Cheap rifleman. Win with numbers.",
+  psycho: "Reckless brawler, lethal up close.",
+  sniper: "Long range. Kills vehicle crews.",
+  pyro:   "Short-range flamer. Melts groups.",
+  jeep:   "Fast scout with a mounted gun.",
+  light:  "Light tank. Mobile armour.",
+  medium: "Heavy armour, slow, big punch.",
+  apc:    "Tough transport, light gun.",
+  pillbox:"Immobile gun nest. Pure defence.",
 };
 
 // HQ (Fort) command-panel options
