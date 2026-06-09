@@ -7,6 +7,7 @@ const G = {
   player: TEAM.BLUE,
   units: [],
   sectors: [],
+  sectorOf: null,           // Int16Array: region id per tile
   factories: [],
   forts: [],
   projectiles: [],
@@ -253,65 +254,108 @@ const G = {
         this.decor.push({ tx, ty, x: Util.cx(tx), y: Util.cy(ty), type: "rock" });
     }
 
-    // ---- sectors: 4 x 3 grid -----------------------------------------
-    const SC = 4, SR = 3;
-    let id = 0;
-    for (let r = 0; r < SR; r++) {
-      for (let c = 0; c < SC; c++) {
-        const x = Math.floor(c * CFG.COLS / SC);
-        const y = Math.floor(r * CFG.ROWS / SR);
-        const w = Math.floor((c + 1) * CFG.COLS / SC) - x;
-        const h = Math.floor((r + 1) * CFG.ROWS / SR) - y;
-        const sec = new Sector(id++, { x, y, w, h });
-        // flag at sector centre, on a guaranteed-clear tile
-        const fx = x + Math.floor(w / 2), fy = y + Math.floor(h / 2);
-        this._clearArea(fx, fy, 1);
-        sec.flag = new Flag(sec, Util.cx(fx), Util.cy(fy));
-        this.sectors.push(sec);
-      }
-    }
+    // ---- irregular sector partition (organic, ~equal area) -----------
+    this._buildSectors();
 
-    // home sectors: left-middle = blue, right-middle = red
-    const blueHome = this.sectors[1 * SC + 0];   // row1,col0
-    const redHome = this.sectors[1 * SC + 3];    // row1,col3
-    blueHome.owner = TEAM.BLUE;
-    redHome.owner = TEAM.RED;
+    // home sectors: leftmost region = blue, rightmost = red
+    let blueHome = this.sectors[0], redHome = this.sectors[0];
+    for (const s of this.sectors) { if (s.tx < blueHome.tx) blueHome = s; if (s.tx > redHome.tx) redHome = s; }
+    blueHome.owner = TEAM.BLUE; redHome.owner = TEAM.RED;
+
+    // flag at each region's representative interior tile
+    for (const s of this.sectors) { this._clearArea(s.tx, s.ty, 1); s.flag = new Flag(s, s.cx, s.cy); }
 
     // ---- factories ----------------------------------------------------
-    // home sectors get a robot + vehicle factory; some neutral sectors get one.
-    this._addFactory(blueHome, "robot", -2, -2);
-    this._addFactory(blueHome, "vehicle", 2, 2);
-    this._addFactory(redHome, "robot", 2, -2);
-    this._addFactory(redHome, "vehicle", -2, 2);
-
-    const neutralFactoryPlan = [
-      [0, "robot"], [2, "vehicle"], [3, "gun"],
-      [4, "vehicle"], [7, "robot"], [9, "gun"],
-      [10, "robot"], [11, "vehicle"],
-    ];
-    for (const [si, kind] of neutralFactoryPlan) {
-      const s = this.sectors[si];
-      if (s.owner === TEAM.NEUTRAL) this._addFactory(s, kind, 0, -2);
+    this._addFactory(blueHome, "robot", -2, -1);
+    this._addFactory(blueHome, "vehicle", 2, 1);
+    this._addFactory(redHome, "robot", 2, -1);
+    this._addFactory(redHome, "vehicle", -2, 1);
+    // most neutral regions get a factory, cycling type (varies each game)
+    const kinds = ["robot", "vehicle", "gun"]; let ki = 0;
+    for (const s of this.sectors) {
+      if (s.owner !== TEAM.NEUTRAL) continue;
+      if (Util.chance(0.8)) this._addFactory(s, kinds[ki++ % kinds.length], 0, -1);
     }
 
-    // ---- forts --------------------------------------------------------
-    const bfx = blueHome.rect.x + 2, bfy = blueHome.rect.y + Math.floor(blueHome.rect.h / 2);
-    const rfx = redHome.rect.x + redHome.rect.w - 3, rfy = redHome.rect.y + Math.floor(redHome.rect.h / 2);
+    // ---- forts (each home region, pushed toward its map edge) --------
+    const bfx = Util.clamp(blueHome.tx - 3, 2, CFG.COLS - 3), bfy = Util.clamp(blueHome.ty, 3, CFG.ROWS - 4);
+    const rfx = Util.clamp(redHome.tx + 3, 2, CFG.COLS - 3), rfy = Util.clamp(redHome.ty, 3, CFG.ROWS - 4);
     this._clearArea(bfx, bfy, 3); this._clearArea(rfx, rfy, 3);
     this.forts.push(new Fort(TEAM.BLUE, Util.cx(bfx), Util.cy(bfy), { x: bfx, y: bfy }));
     this.forts.push(new Fort(TEAM.RED, Util.cx(rfx), Util.cy(rfy), { x: rfx, y: rfy }));
 
-    // ---- starting armies ---------------------------------------------
+    // ---- starting armies + a neutral tank to fight over --------------
     this._spawnSquad(TEAM.BLUE, Util.cx(bfx + 3), Util.cy(bfy), ["grunt", "grunt", "psycho", "sniper"]);
     this._spawnSquad(TEAM.RED, Util.cx(rfx - 3), Util.cy(rfy), ["grunt", "grunt", "psycho", "sniper"]);
-    // a neutral abandoned tank in the middle to fight over
     const mtx = Math.floor(CFG.COLS / 2), mty = Math.floor(CFG.ROWS / 2);
-    this._clearArea(mtx, mty + 6, 1);
-    this.units.push(new Unit("machine", "light", null, Util.cx(mtx), Util.cy(mty + 6)));
+    this._clearArea(mtx, mty, 1);
+    this.units.push(new Unit("machine", "light", null, Util.cx(mtx), Util.cy(mty)));
 
-    // ---- roads + defensive sandbags (need fort/sector positions) ------
-    this._carveRoads(blueHome, redHome);
+    // ---- road network following the partition + a few sandbags -------
+    this._carveRoads();
     this._placeSandbags();
+  },
+
+  /* Partition the whole tile grid into organic, roughly equal-area regions by
+   * balanced simultaneous growth from jittered seeds — fair division, varied
+   * shapes, borders aligned to the pixel/tile grid, different every game. */
+  _buildSectors() {
+    const COLS = CFG.COLS, ROWS = CFG.ROWS, TOTAL = COLS * ROWS;
+    const gc = 4, gr = 3, K = gc * gr;                 // 12 regions, jittered grid of seeds
+    const seeds = [];
+    for (let r = 0; r < gr; r++) for (let c = 0; c < gc; c++) {
+      const x0 = c * COLS / gc, x1 = (c + 1) * COLS / gc, y0 = r * ROWS / gr, y1 = (r + 1) * ROWS / gr;
+      const sx = Util.clamp(Math.round(x0 + Util.rand(0.28, 0.72) * (x1 - x0)), 1, COLS - 2);
+      const sy = Util.clamp(Math.round(y0 + Util.rand(0.28, 0.72) * (y1 - y0)), 1, ROWS - 2);
+      seeds.push({ x: sx, y: sy });
+    }
+    const region = new Int16Array(TOTAL).fill(-1);
+    const frontier = seeds.map(() => []);
+    seeds.forEach((s, i) => { const k = s.y * COLS + s.x; region[k] = i; frontier[i].push(k); });
+    let remaining = TOTAL - K;
+    const NB = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const order = Array.from({ length: K }, (_, i) => i);
+    while (remaining > 0) {
+      for (let i = order.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [order[i], order[j]] = [order[j], order[i]]; }
+      let progressed = false;
+      for (const i of order) {                          // each region claims ONE tile -> equal areas
+        const fr = frontier[i];
+        let claimed = false;
+        while (fr.length && !claimed) {
+          const k = fr[0], x = k % COLS, y = (k / COLS) | 0;
+          const nb = NB.slice();
+          for (let a = nb.length - 1; a > 0; a--) { const b = (Math.random() * (a + 1)) | 0; [nb[a], nb[b]] = [nb[b], nb[a]]; }
+          let took = false;
+          for (const [dx, dy] of nb) {
+            const nx = x + dx, ny = y + dy;
+            if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue;
+            const nk = ny * COLS + nx;
+            if (region[nk] === -1) { region[nk] = i; fr.push(nk); remaining--; claimed = progressed = took = true; break; }
+          }
+          if (!took) fr.shift();                         // interior tile — retire it
+        }
+      }
+      if (!progressed) break;
+    }
+    for (let k = 0; k < TOTAL; k++) if (region[k] === -1) {   // assign stragglers
+      const x = k % COLS, y = (k / COLS) | 0;
+      for (const [dx, dy] of NB) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= COLS || ny >= ROWS) continue; const nk = ny * COLS + nx; if (region[nk] >= 0) { region[k] = region[nk]; break; } }
+      if (region[k] === -1) region[k] = 0;
+    }
+    this.sectorOf = region;
+
+    // Sector objects: tile count, representative interior tile, fill runs
+    this.sectors = Array.from({ length: K }, (_, i) => new Sector(i));
+    const sumX = new Float64Array(K), sumY = new Float64Array(K), cnt = new Int32Array(K);
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) { const i = region[y * COLS + x]; sumX[i] += x; sumY[i] += y; cnt[i]++; }
+    const fcx = new Float64Array(K), fcy = new Float64Array(K), bestD = new Float64Array(K).fill(Infinity);
+    for (let i = 0; i < K; i++) { fcx[i] = sumX[i] / cnt[i]; fcy[i] = sumY[i] / cnt[i]; this.sectors[i].tileCount = cnt[i]; }
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const i = region[y * COLS + x], d = (x - fcx[i]) ** 2 + (y - fcy[i]) ** 2;
+      if (d < bestD[i]) { bestD[i] = d; this.sectors[i].tx = x; this.sectors[i].ty = y; }
+    }
+    for (const s of this.sectors) { s.cx = Util.cx(s.tx); s.cy = Util.cy(s.ty); }
+    for (let y = 0; y < ROWS; y++) { let x = 0; while (x < COLS) { const i = region[y * COLS + x]; let x1 = x; while (x1 + 1 < COLS && region[y * COLS + x1 + 1] === i) x1++; this.sectors[i].runs.push({ y, x0: x, x1 }); x = x1 + 1; } }
   },
 
   _inBounds(x, y) { return x >= 0 && y >= 0 && x < CFG.COLS && y < CFG.ROWS; },
@@ -332,33 +376,44 @@ const G = {
     this.walls.delete(k);
   },
 
-  _carveRoads(blueHome, redHome) {
-    const lane = blueHome.rect.y + Math.floor(blueHome.rect.h / 2);
-    // main highway linking the two forts straight across the middle
-    for (let x = 0; x < CFG.COLS; x++) { this._road(x, lane); this._road(x, lane + 1); }
-    // vertical connectors through each sector column centre
-    for (let c = 0; c < 4; c++) {
-      const cx = Math.floor((c + 0.5) * CFG.COLS / 4);
-      for (let y = 0; y < CFG.ROWS; y++) this._road(cx, y);
+  // L-shaped road between two representative tiles
+  _linkRoad(ax, ay, bx, by) {
+    for (let x = Math.min(ax, bx); x <= Math.max(ax, bx); x++) this._road(x, ay);
+    for (let y = Math.min(ay, by); y <= Math.max(ay, by); y++) this._road(bx, y);
+  },
+
+  // Road network that follows the partition: connect every pair of adjacent
+  // regions through their centres, then link each fort to its home flag.
+  _carveRoads() {
+    const COLS = CFG.COLS, ROWS = CFG.ROWS, seen = new Set();
+    for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+      const i = this.sectorOf[y * COLS + x];
+      for (const [dx, dy] of [[1, 0], [0, 1]]) {
+        const nx = x + dx, ny = y + dy; if (nx >= COLS || ny >= ROWS) continue;
+        const j = this.sectorOf[ny * COLS + nx];
+        if (j === i) continue;
+        const key = i < j ? i * 100 + j : j * 100 + i;
+        if (seen.has(key)) continue; seen.add(key);
+        const a = this.sectors[i], b = this.sectors[j];
+        this._linkRoad(a.tx, a.ty, b.tx, b.ty);
+      }
     }
-    // little spurs to every flag so sectors feel connected
-    for (const s of this.sectors) {
-      const fx = Util.tx(s.flag.x), fy = Util.ty(s.flag.y);
-      const cx = Math.floor((Math.floor(fx / (CFG.COLS / 4)) + 0.5) * CFG.COLS / 4);
-      const a = Math.min(cx, fx), b = Math.max(cx, fx);
-      for (let x = a; x <= b; x++) this._road(x, fy);
+    for (const f of this.forts) {
+      const s = Sectors.sectorAt(f.x, f.y);
+      if (s) this._linkRoad(Util.tx(f.x), Util.ty(f.y), s.tx, s.ty);
     }
   },
 
   _placeSandbags() {
-    // a destructible sandbag line bracketing the central highway gap,
-    // so boxed-in units demonstrate shooting through walls.
-    const midX = Math.floor(CFG.COLS / 2), lane = Math.floor(CFG.ROWS / 2);
-    for (let dy = -5; dy <= 6; dy++) {
-      const y = lane + dy;
-      if (Math.abs(dy) <= 1) continue;            // leave the road open
-      for (const x of [midX - 6, midX + 6]) {
-        if (this.terrain[this.tkey(x, y)] === TERR.SAND && Util.chance(0.8)) {
+    // a few short destructible sandbag walls so boxed-in units demonstrate
+    // shooting through walls; placed on open sand around the map middle.
+    const cx = Math.floor(CFG.COLS / 2);
+    for (let i = 0; i < 4; i++) {
+      const bx = Util.clamp(cx + Util.randInt(-12, 12), 2, CFG.COLS - 3);
+      const by = Util.randInt(5, CFG.ROWS - 6), len = Util.randInt(3, 6);
+      for (let d = 0; d < len; d++) {
+        const x = bx, y = by + d;
+        if (this._inBounds(x, y) && this.terrain[this.tkey(x, y)] === TERR.SAND) {
           this.terrain[this.tkey(x, y)] = TERR.WALL;
           this.walls.set(this.tkey(x, y), 60);
         }
@@ -374,8 +429,8 @@ const G = {
   },
 
   _addFactory(sector, kind, dx, dy) {
-    const fx = sector.rect.x + Math.floor(sector.rect.w / 2) + dx;
-    const fy = sector.rect.y + Math.floor(sector.rect.h / 2) + dy;
+    const fx = Util.clamp(sector.tx + dx, 1, CFG.COLS - 2);
+    const fy = Util.clamp(sector.ty + dy, 1, CFG.ROWS - 2);
     this._clearArea(fx, fy, 1);
     const f = new Factory(sector, Util.cx(fx), Util.cy(fy), kind);
     sector.factories.push(f);
@@ -560,6 +615,20 @@ const G = {
     }
 
     for (const d of this.decor) this._decor(c, d, K);
+
+    // sector borders baked over the terrain: a solid carved line with a
+    // dotted bright highlight (reads through the per-frame ownership tint)
+    for (let y = 0; y < CFG.ROWS; y++) for (let x = 0; x < CFG.COLS; x++) {
+      const i = this.sectorOf[this.tkey(x, y)], X = x * T, Y = y * T;
+      if (x + 1 < CFG.COLS && this.sectorOf[this.tkey(x + 1, y)] !== i) {
+        c.fillStyle = "rgba(0,0,0,0.55)"; c.fillRect(X + T - 1, Y, 1, T);
+        c.fillStyle = "rgba(255,236,190,0.45)"; for (let yy = 0; yy < T; yy += 3) c.fillRect(X + T - 2, Y + yy, 1, 1);
+      }
+      if (y + 1 < CFG.ROWS && this.sectorOf[this.tkey(x, y + 1)] !== i) {
+        c.fillStyle = "rgba(0,0,0,0.55)"; c.fillRect(X, Y + T - 1, T, 1);
+        c.fillStyle = "rgba(255,236,190,0.45)"; for (let xx = 0; xx < T; xx += 3) c.fillRect(X + xx, Y + T - 2, 1, 1);
+      }
+    }
     this.bg = bg;
   },
 
@@ -622,24 +691,16 @@ const G = {
     const ctx = this.ctx, T = CFG.TILE;
     ctx.drawImage(this.bg, 0, 0);
 
-    // sector tints + borders
+    // sector ownership tint over the irregular regions (borders are baked)
+    const fillRuns = (s, style) => { ctx.fillStyle = style; for (const r of s.runs) ctx.fillRect(r.x0 * T, r.y * T, (r.x1 - r.x0 + 1) * T, T); };
     for (const s of this.sectors) {
       const col = s.owner === TEAM.BLUE ? "77,166,255" : s.owner === TEAM.RED ? "255,91,91" : "150,150,150";
-      ctx.fillStyle = `rgba(${col},${s.owner === TEAM.NEUTRAL ? 0.04 : 0.10})`;
-      ctx.fillRect(s.px, s.py, s.pw, s.ph);
-      // capture-in-progress: light up the whole square in the attacker's colour
+      fillRuns(s, `rgba(${col},${s.owner === TEAM.NEUTRAL ? 0.05 : 0.12})`);
       if (s.capProgress > 0 && s.capTeam) {
-        const cc = s.contested ? "255,255,255"
-                 : s.capTeam === TEAM.BLUE ? "77,166,255" : "255,91,91";
-        ctx.fillStyle = `rgba(${cc},${0.05 + 0.16 * s.capProgress})`;
-        ctx.fillRect(s.px, s.py, s.pw, s.ph);
+        const cc = s.contested ? "255,255,255" : s.capTeam === TEAM.BLUE ? "77,166,255" : "255,91,91";
+        fillRuns(s, `rgba(${cc},${0.05 + 0.18 * s.capProgress})`);
       }
-      if (s.flash > 0) { ctx.fillStyle = `rgba(${col},${0.25 * s.flash})`; ctx.fillRect(s.px, s.py, s.pw, s.ph); }
-      ctx.strokeStyle = (s.capProgress > 0 && s.capTeam)
-        ? (s.contested ? "rgba(255,255,255,0.7)" : `rgba(${s.capTeam === TEAM.BLUE ? "77,166,255" : "255,91,91"},0.8)`)
-        : "rgba(0,0,0,0.55)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(s.px + 1, s.py + 1, s.pw - 2, s.ph - 2);
+      if (s.flash > 0) fillRuns(s, `rgba(${col},${0.25 * s.flash})`);
     }
 
     // destructible sandbag walls (dynamic — show wear as they take damage)
@@ -916,13 +977,11 @@ const G = {
     const ox = this.canvas.width - mw - 8, oy = 8;
     const sx = mw / (CFG.COLS * CFG.TILE), sy = mh / (CFG.ROWS * CFG.TILE);
     ctx.fillStyle = "rgba(8,10,12,0.85)"; ctx.fillRect(ox - 2, oy - 2, mw + 4, mh + 4);
-    // sectors
+    // sectors (irregular regions via fill runs)
+    const T = CFG.TILE;
     for (const s of this.sectors) {
-      const col = s.owner === TEAM.BLUE ? "rgba(77,166,255,0.5)" : s.owner === TEAM.RED ? "rgba(255,91,91,0.5)" : "rgba(120,110,90,0.5)";
-      ctx.fillStyle = col;
-      ctx.fillRect(ox + s.px * sx, oy + s.py * sy, s.pw * sx, s.ph * sy);
-      ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 0.5;
-      ctx.strokeRect(ox + s.px * sx, oy + s.py * sy, s.pw * sx, s.ph * sy);
+      ctx.fillStyle = s.owner === TEAM.BLUE ? "rgba(77,166,255,0.55)" : s.owner === TEAM.RED ? "rgba(255,91,91,0.55)" : "rgba(120,110,90,0.5)";
+      for (const r of s.runs) ctx.fillRect(ox + r.x0 * T * sx, oy + r.y * T * sy, (r.x1 - r.x0 + 1) * T * sx + 0.6, T * sy + 0.6);
     }
     // forts
     for (const f of this.forts) {

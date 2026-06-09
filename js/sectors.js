@@ -20,9 +20,8 @@
  * ========================================================================= */
 
 class Sector {
-  constructor(id, tileRect) {
+  constructor(id) {
     this.id = id;
-    this.rect = tileRect;            // {x,y,w,h} in tiles
     this.owner = TEAM.NEUTRAL;
     this.flag = null;
     this.factories = [];
@@ -31,13 +30,12 @@ class Sector {
     this.capTeam = null;             // team currently filling the meter
     this.capProgress = 0;            // 0..1
     this.contested = false;          // both sides (or owner defending) on point
+    // irregular region geometry (filled in by the map generator)
+    this.runs = [];                  // [{y,x0,x1}] horizontal tile runs (fast fill)
+    this.tx = 0; this.ty = 0;        // representative interior tile (flag / centre)
+    this.cx = 0; this.cy = 0;        // that tile's centre, in pixels
+    this.tileCount = 0;
   }
-
-  // pixel bounds
-  get px() { return this.rect.x * CFG.TILE; }
-  get py() { return this.rect.y * CFG.TILE; }
-  get pw() { return this.rect.w * CFG.TILE; }
-  get ph() { return this.rect.h * CFG.TILE; }
 
   /* Ownership change (after a capture meter completes). All factories here
    * switch production to the new owner and DISCARD any progress — a 90%-built
@@ -125,10 +123,8 @@ const Sectors = {
 
   sectorAt(px, py) {
     const tx = Util.tx(px), ty = Util.ty(py);
-    for (const s of G.sectors) {
-      if (tx >= s.rect.x && tx < s.rect.x + s.rect.w &&
-          ty >= s.rect.y && ty < s.rect.y + s.rect.h) return s;
-    }
-    return null;
+    if (tx < 0 || ty < 0 || tx >= CFG.COLS || ty >= CFG.ROWS) return null;
+    const id = G.sectorOf ? G.sectorOf[ty * CFG.COLS + tx] : -1;
+    return id >= 0 ? G.sectors[id] : null;
   },
 };
