@@ -71,8 +71,27 @@ class Commander {
   update(dt) {
     this.tick -= dt;
     this.prodTick -= dt;
+    this.manaTick = (this.manaTick || 0) - dt;
     if (this.prodTick <= 0) { this.prodTick = 5; this._manageProduction(); }
     if (this.tick <= 0) { this.tick = 1.2; this._command(); }
+    if (this.manaTick <= 0) { this.manaTick = 4; this._spendMana(); }
+  }
+
+  // Spend banked mana: upgrades when comfortable, emergency units when behind.
+  _spendMana() {
+    const mana = G.mana[this.team], enemy = enemyOf(this.team);
+    const behind = G.unitCount(this.team) < G.unitCount(enemy) - 2
+                || Sectors.countOwned(this.team) < Sectors.countOwned(enemy);
+    if (behind && mana >= G.manaCost("light")) {
+      // reinforce: a couple of cheap grunts or a tank, depending on the gap
+      if (G.unitCount(this.team) < G.unitCount(enemy) - 4 && mana >= G.manaCost("medium")) G.instantBuild(this.team, "medium");
+      else { G.instantBuild(this.team, "grunt"); G.instantBuild(this.team, "grunt"); }
+      return;
+    }
+    if (mana >= 140) {                          // bank is healthy -> invest in upgrades
+      const cats = ["vehAtk", "infAtk", "vehDef", "infDef"];
+      for (const c of cats) if (G.upgrades[this.team][c] < CFG.UPGRADE_MAX) { G.buyUpgrade(this.team, c); break; }
+    }
   }
 
   _manageProduction() {

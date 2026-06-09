@@ -23,6 +23,7 @@
 const Input = {
   drag: null,                 // {x0,y0,x1,y1,additive}
   selectedFactory: null,
+  selectedFort: null,
   mouse: { x: 0, y: 0 },
   attackMoveArmed: false,     // 'A' pressed, waiting for the target click
   hover: { kind: "move" },    // what a right-click would do at the cursor
@@ -58,7 +59,7 @@ const Input = {
       if (k === "a") this.attackMoveArmed = !this.attackMoveArmed;
       else if (k === "h") { this._forSelected(u => u.orderHold()); this.attackMoveArmed = false; }
       else if (k === "s") { this._forSelected(u => u.stop()); this.attackMoveArmed = false; }
-      else if (k === "escape") { this._clearSelection(); this.selectedFactory = null; this.attackMoveArmed = false; UI.refreshFactoryPanel(); }
+      else if (k === "escape") { this._clearSelection(); this.selectedFactory = null; this.selectedFort = null; this.attackMoveArmed = false; UI.refreshFactoryPanel(); }
     });
   },
 
@@ -82,30 +83,37 @@ const Input = {
       if (!u.alive || u.team !== G.player || !u.crewed) continue;
       if (u.x >= x0 && u.x <= x1 && u.y >= y0 && u.y <= y1) u.selected = true;
     }
-    this.selectedFactory = null;
+    this.selectedFactory = null; this.selectedFort = null;
     UI.refreshFactoryPanel();
   },
 
   _click(d) {
     const p = { x: d.x1, y: d.y1 };
+    // your own HQ? open the command panel
+    const fort = G.fortAt(p.x, p.y);
+    if (fort && fort.team === G.player) {
+      this._clearSelection();
+      this.selectedFort = fort; this.selectedFactory = null; UI.refreshFactoryPanel(); return;
+    }
     // your own factory? open build panel
     const f = G.factoryAt(p.x, p.y);
     if (f && f.team === G.player) {
       this._clearSelection();
-      this.selectedFactory = f; UI.refreshFactoryPanel(); return;
+      this.selectedFactory = f; this.selectedFort = null; UI.refreshFactoryPanel(); return;
     }
     const u = G.unitAt(p.x, p.y);
     if (!d.additive) this._clearSelection();
     if (u && u.team === G.player && u.crewed) u.selected = !d.additive ? true : !u.selected;
-    this.selectedFactory = null;
+    this.selectedFactory = null; this.selectedFort = null;
     UI.refreshFactoryPanel();
   },
 
   /* ---- right button: context order ----------------------------------- */
   _rightClick(p, e) {
-    // factory selected -> set rally
-    if (this.selectedFactory && this.selectedFactory.team === G.player) {
-      this.selectedFactory.rally = { x: p.x, y: p.y };
+    // factory / HQ selected -> set rally
+    const depot = this.selectedFort || this.selectedFactory;
+    if (depot && depot.team === G.player) {
+      depot.rally = { x: p.x, y: p.y };
       G.fx.push(new CommandMarker(p.x, p.y, "rally"));
       return;
     }
@@ -161,7 +169,7 @@ const Input = {
 
   /* ---- hover: decide what the cursor should advertise ----------------- */
   _updateHover(p, e) {
-    if (this.selectedFactory) { this.hover = { kind: "rally" }; return; }
+    if (this.selectedFactory || this.selectedFort) { this.hover = { kind: "rally" }; return; }
     if (!this.hasSelection()) {
       const u = G.unitAt(p.x, p.y);
       this.hover = { kind: (u && u.team === G.player && u.crewed) ? "select" : "none" };
@@ -191,6 +199,7 @@ const UI = {
       redSpeed: document.getElementById("red-speed"),
       blueFort: document.getElementById("blue-fort"),
       redFort: document.getElementById("red-fort"),
+      blueMana: document.getElementById("blue-mana"),
       clock: document.getElementById("clock"),
       buildBtns: document.getElementById("build-buttons"),
       panel: document.getElementById("factory-panel"),
@@ -213,22 +222,76 @@ const UI = {
     const rf = G.forts.find(f => f.team === TEAM.RED);
     e.blueFort.textContent = bf ? Math.max(0, Math.ceil(bf.hp / bf.maxHp * 100)) : 0;
     e.redFort.textContent = rf ? Math.max(0, Math.ceil(rf.hp / rf.maxHp * 100)) : 0;
+    e.blueMana.textContent = Math.floor(G.mana[TEAM.BLUE]);
     e.clock.textContent = Util.fmtTime(G.time);
+  },
+
+  _title(text) { const t = this.el.panel.querySelector(".panel-title"); if (t) t.textContent = text; },
+
+  _btn(label, { active, disabled, onclick } = {}) {
+    const b = document.createElement("button");
+    b.className = "build-btn" + (active ? " active" : "");
+    b.textContent = label;
+    if (disabled) b.disabled = true; else b.onclick = onclick;
+    return b;
+  },
+
+  _group(labelText) {
+    const g = document.createElement("div"); g.className = "panel-group";
+    const l = document.createElement("span"); l.className = "group-label"; l.textContent = labelText;
+    g.appendChild(l);
+    this.el.buildBtns.appendChild(g);
+    return g;
   },
 
   refreshFactoryPanel() {
     const wrap = this.el.buildBtns;
     wrap.innerHTML = "";
+    if (Input.selectedFort) return this._renderFortPanel(Input.selectedFort);
+
     const f = Input.selectedFactory;
-    if (!f) { this.el.panel.classList.add("empty"); return; }
+    if (!f) { this.el.panel.classList.add("empty"); this._title("SELECTED FACTORY — set production"); return; }
     this.el.panel.classList.remove("empty");
+    this._title(`FACTORY (${f.ftype.toUpperCase()}) — choose what to build`);
     for (const key of f.spec.keys) {
       const def = f.spec.table[key];
-      const btn = document.createElement("button");
-      btn.className = "build-btn" + (f.queueKey === key ? " active" : "");
-      btn.textContent = `${def.name} (${def.baseTime}s)`;
-      btn.onclick = () => { f.setQueue(key); this.refreshFactoryPanel(); };
-      wrap.appendChild(btn);
+      wrap.appendChild(this._btn(`${def.name} (${def.baseTime}s)`, {
+        active: f.queueKey === key, onclick: () => { f.setQueue(key); this.refreshFactoryPanel(); },
+      }));
+    }
+  },
+
+  _renderFortPanel(fort) {
+    this.el.panel.classList.remove("empty");
+    const team = fort.team, mana = Math.floor(G.mana[team]);
+    this._title(`MAIN HQ — MANA ${mana}/${CFG.MANA_MAX}  (mana banks when you lose territory)`);
+
+    // 1) time-based training
+    let g = this._group("Train:");
+    for (const key of FORT_TRAIN_KEYS) {
+      g.appendChild(this._btn(G.unitName(key), {
+        active: fort.trainKey === key, onclick: () => { fort.setTrain(key); this.refreshFactoryPanel(); },
+      }));
+    }
+    // 2) instant build (spend mana)
+    g = this._group("Instant:");
+    for (const key of INSTANT_KEYS) {
+      const cost = G.manaCost(key);
+      g.appendChild(this._btn(`${G.unitName(key)} ⚡${cost}`, {
+        disabled: mana < cost,
+        onclick: () => { G.instantBuild(team, key); this.refreshFactoryPanel(); },
+      }));
+    }
+    // 3) upgrades (spend mana)
+    g = this._group("Upgrade:");
+    for (const def of UPGRADE_DEFS) {
+      const lvl = G.upgrades[team][def.key];
+      const maxed = lvl >= CFG.UPGRADE_MAX;
+      const cost = maxed ? 0 : CFG.UPGRADE_COST[lvl];
+      g.appendChild(this._btn(maxed ? `${def.name} MAX` : `${def.name} L${lvl}→${lvl + 1} ⚡${cost}`, {
+        disabled: maxed || mana < cost,
+        onclick: () => { G.buyUpgrade(team, def.key); this.refreshFactoryPanel(); },
+      }));
     }
   },
 

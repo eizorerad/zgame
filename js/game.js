@@ -15,6 +15,9 @@ const G = {
   walls: new Map(),         // key -> hp  (destructible sandbags)
   terrain: null,            // Uint8Array of TERR.* values
   decor: [],                // non-blocking scenery (cacti, etc.)
+  mana: { blue: 0, red: 0 },                                   // HQ comeback economy
+  upgrades: { blue: { infAtk: 0, infDef: 0, vehAtk: 0, vehDef: 0 },
+              red:  { infAtk: 0, infDef: 0, vehAtk: 0, vehDef: 0 } },
   time: 0,
   dt: 0,
   running: false,
@@ -78,6 +81,36 @@ const G = {
   /* ---- queries -------------------------------------------------------- */
   actualBuildTime(base, team) {
     return base / Sectors.speedMultiplier(team);
+  },
+
+  // unit-type lookups (shared by factories, the HQ and mana builds)
+  kindOf(type) { return INFANTRY_TYPES[type] ? "infantry" : "machine"; },
+  baseTimeOf(type) { return (INFANTRY_TYPES[type] || VEHICLE_TYPES[type] || GUN_TYPES[type]).baseTime; },
+  unitName(type) { return (INFANTRY_TYPES[type] || VEHICLE_TYPES[type] || GUN_TYPES[type]).name; },
+  manaCost(type) { return Math.round(this.baseTimeOf(type) * 1.3); },
+
+  // spend mana to instantly spawn a unit at the team's HQ
+  instantBuild(team, type) {
+    const cost = this.manaCost(type);
+    if (this.mana[team] < cost) return false;
+    const fort = this.forts.find(f => f.alive && f.team === team);
+    if (!fort) return false;
+    this.mana[team] -= cost;
+    const u = fort.spawn(type);
+    this.fx.push(new RankUp(u.x, u.y));            // little spawn flourish
+    return true;
+  },
+
+  // spend mana on an attack/defence upgrade level
+  buyUpgrade(team, cat) {
+    const up = this.upgrades[team];
+    const lvl = up[cat];
+    if (lvl >= CFG.UPGRADE_MAX) return false;
+    const cost = CFG.UPGRADE_COST[lvl];
+    if (this.mana[team] < cost) return false;
+    this.mana[team] -= cost;
+    up[cat] = lvl + 1;
+    return true;
   },
 
   unitCount(team) {
@@ -372,6 +405,10 @@ const G = {
     if (this.over) return;
     this.dt = dt;
     this.time += dt;
+
+    // passive mana regen for both HQs (capped)
+    this.mana.blue = Math.min(CFG.MANA_MAX, this.mana.blue + CFG.MANA_REGEN * dt);
+    this.mana.red = Math.min(CFG.MANA_MAX, this.mana.red + CFG.MANA_REGEN * dt);
 
     this.commander.update(dt);
 
@@ -819,6 +856,16 @@ const G = {
       PX.fillCircle(ctx, f.x, f.y, 4, main, 2);
 
       this._bar(ctx, f.x, y - 8, W, f.hp / f.maxHp, main);
+
+      // HQ training countdown (green, like the factories) + thin bar
+      const remain = Math.max(0, G.actualBuildTime(G.baseTimeOf(f.trainKey), f.team) - f.trainProgress);
+      const txt = Util.fmtTime(remain);
+      let tw = 0; for (const ch of txt) tw += (PXFONT[ch] || PXFONT[" "])[0].length + 1; tw -= 1;
+      const ry = y + H + 2;
+      ctx.fillStyle = "#0a120a"; ctx.fillRect(f.x - tw / 2 - 1, ry, tw + 2, 7);
+      this._drawDigits(ctx, Math.round(f.x - tw / 2), ry + 1, txt, "#56d65a");
+      ctx.fillStyle = "#000"; ctx.fillRect(f.x - W / 2, ry + 8, W, 2);
+      ctx.fillStyle = main; ctx.fillRect(f.x - W / 2, ry + 8, W * f.trainFraction(), 2);
     }
   },
 

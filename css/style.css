@@ -120,7 +120,9 @@ button:hover { background: var(--blue); color: #001; }
 button:active { transform: translate(2px, 2px); box-shadow: none; }
 
 #factory-panel .panel-title { color: #6c7a72; font-size: 11px; margin-bottom: 4px; }
-#build-buttons { display: flex; gap: 8px; flex-wrap: wrap; min-height: 30px; }
+#build-buttons { display: flex; gap: 6px; flex-wrap: wrap; min-height: 30px; }
+.panel-group { flex-basis: 100%; display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
+.group-label { color: #b98aff; font-size: 10px; min-width: 52px; letter-spacing: 1px; }
 
 .build-btn {
   margin: 0;

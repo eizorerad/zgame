@@ -78,9 +78,13 @@ class Unit {
   get speed() { return (this.kind === "machine" && this.immobile ? 0 : this.stats.speed) * CFG.SPEED_SCALE; }
   get crewed() { return this.kind === "infantry" || !!this.driver; }
 
-  // ---- veterancy-scaled combat stats ----
+  // ---- veterancy- and upgrade-scaled combat stats ----
   get range() { return this.stats.range * (1 + this.rank * VET.rangePerRank); }
-  get dmg() { return this.stats.dmg * (1 + this.rank * VET.dmgPerRank); }
+  get dmg() {
+    const up = G.upgrades && G.upgrades[this.team];
+    const lvl = up ? (this.kind === "infantry" ? up.infAtk : up.vehAtk) : 0;
+    return this.stats.dmg * (1 + this.rank * VET.dmgPerRank) * (1 + lvl * CFG.UPGRADE_STEP);
+  }
   get fireCooldown() { return this.stats.cooldown * (1 + this.rank * VET.cooldownPerRank); }
 
   isVehicle() { return this.kind === "machine" && !this.immobile; }
@@ -312,6 +316,9 @@ class Unit {
   /* ---- damage -------------------------------------------------------- */
   applyDamage(amount, attacker, sniperKill) {
     if (!this.alive) return;
+    // defence upgrades reduce incoming damage
+    const up = G.upgrades && G.upgrades[this.team];
+    if (up) { const lvl = this.kind === "infantry" ? up.infDef : up.vehDef; amount = amount / (1 + lvl * CFG.UPGRADE_STEP); }
     if (this.kind === "infantry") {
       this.hp -= amount;
       if (this.hp <= 0) this.die(attacker);
@@ -440,10 +447,15 @@ class Fort {
     this.turretCd = 0;
     this.w = CFG.TILE * 5;
     this.h = CFG.TILE * 4;
+    // the HQ also trains a chosen unit over time
+    this.trainKey = "grunt";
+    this.trainProgress = 0;
+    this.rally = null;
   }
 
   update(dt) {
     if (!this.alive) return;
+    // automated turret
     if (this.turretCd > 0) this.turretCd -= dt;
     if (this.turretCd <= 0) {
       const foe = G.nearestEnemyUnit(this.x, this.y, this.team, CFG.FORT_TURRET_RANGE);
@@ -453,6 +465,30 @@ class Fort {
         foe.applyDamage(CFG.FORT_TURRET_DMG, this, false);
       }
     }
+    // time-based training of the selected unit
+    if (this.trainKey) {
+      this.trainProgress += dt;
+      if (this.trainProgress >= G.actualBuildTime(G.baseTimeOf(this.trainKey), this.team)) {
+        this.trainProgress = 0;
+        this.spawn(this.trainKey);
+      }
+    }
+  }
+
+  trainFraction() {
+    return Util.clamp(this.trainProgress / G.actualBuildTime(G.baseTimeOf(this.trainKey), this.team), 0, 1);
+  }
+
+  setTrain(key) { if (this.trainKey !== key) { this.trainKey = key; this.trainProgress = 0; } }
+
+  // spawn a unit at the HQ (used by training and by instant mana-builds)
+  spawn(typeKey) {
+    const spot = G.freeSpotNear(this.x, this.y + this.h / 2 + CFG.TILE);
+    const kind = G.kindOf(typeKey);
+    const u = new Unit(kind, typeKey, this.team, spot.x, spot.y);
+    G.units.push(u);
+    if (this.rally) u.orderMove(this.rally.x, this.rally.y);
+    return u;
   }
 
   applyDamage(amount) {

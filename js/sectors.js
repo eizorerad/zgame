@@ -44,6 +44,10 @@ class Sector {
    * enemy tank is lost; the new owner starts at 0%. */
   setOwner(team) {
     if (this.owner === team) return;
+    // defensive comeback: the team that just LOST this sector banks HQ mana
+    if (this.owner === TEAM.BLUE || this.owner === TEAM.RED) {
+      G.mana[this.owner] = Math.min(CFG.MANA_MAX, G.mana[this.owner] + CFG.MANA_ON_LOSE);
+    }
     this.owner = team;
     this.flash = 0.6;
     for (const f of this.factories) f.onOwnerChanged();

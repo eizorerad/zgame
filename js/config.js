@@ -39,6 +39,15 @@ const CFG = {
   // Tanks crush enemy infantry they roll over
   CRUSH_DMG: 999,
 
+  // ---- HQ mana economy (defensive comeback) ----
+  MANA_MAX: 260,
+  MANA_REGEN: 1.4,          // per second, passive
+  MANA_ON_LOSE: 45,         // granted to a team each time it loses a sector
+  // StarCraft-style upgrades bought with mana (attack / defence, 3 levels)
+  UPGRADE_STEP: 0.15,       // +15% damage or -damage-taken per level
+  UPGRADE_MAX: 3,
+  UPGRADE_COST: [40, 80, 140],
+
   // Desert palette (tuned to the classic Z look)
   COLORS: {
     sand:   "#caa46a",
@@ -123,3 +132,13 @@ const FACTORY_OUTPUT = {
   vehicle: { table: VEHICLE_TYPES,  kind: "vehicle",  keys: ["jeep", "light", "medium", "apc"] },
   gun:     { table: GUN_TYPES,      kind: "gun",      keys: ["pillbox"] },
 };
+
+// HQ (Fort) command-panel options
+const FORT_TRAIN_KEYS = ["grunt", "psycho", "sniper", "pyro", "jeep", "light", "medium", "apc"];
+const INSTANT_KEYS    = ["grunt", "psycho", "sniper", "pyro", "jeep", "light", "medium", "apc", "pillbox"];
+const UPGRADE_DEFS = [
+  { key: "infAtk", name: "Inf Atk" },
+  { key: "infDef", name: "Inf Def" },
+  { key: "vehAtk", name: "Veh Atk" },
+  { key: "vehDef", name: "Veh Def" },
+];
