@@ -22,6 +22,10 @@ const CFG = {
   // How wide a unit "sees" for autonomous aggression (pixels)
   DEFAULT_AGGRO: 120,
 
+  // Units are drawn (and collide) larger; movement is globally slowed.
+  UNIT_SCALE: 1.45,
+  SPEED_SCALE: 0.5,
+
   // Fort
   FORT_HP: 500,
   FORT_TURRET_RANGE: 150,

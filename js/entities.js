@@ -74,8 +74,8 @@ class Unit {
   }
   set team(t) { this._team = t; }
 
-  get radius() { return this.stats.radius; }
-  get speed() { return this.kind === "machine" && this.immobile ? 0 : this.stats.speed; }
+  get radius() { return this.stats.radius * CFG.UNIT_SCALE; }
+  get speed() { return (this.kind === "machine" && this.immobile ? 0 : this.stats.speed) * CFG.SPEED_SCALE; }
   get crewed() { return this.kind === "infantry" || !!this.driver; }
 
   // ---- veterancy-scaled combat stats ----

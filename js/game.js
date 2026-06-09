@@ -208,11 +208,16 @@ const G = {
     this._blob(CFG.COLS - 5, 4, 3, TERR.WATER, 0.85);
     this._blob(5, CFG.ROWS - 5, 3, TERR.WATER, 0.85);
 
-    // scatter cacti decoration on open sand
+    // scatter cacti + boulders on open sand
     for (let i = 0; i < 60; i++) {
       const tx = Util.randInt(1, CFG.COLS - 2), ty = Util.randInt(1, CFG.ROWS - 2);
       if (this.terrain[this.tkey(tx, ty)] === TERR.SAND && Util.chance(0.5))
-        this.decor.push({ tx, ty, x: Util.cx(tx), y: Util.cy(ty), h: Util.randInt(4, 7) });
+        this.decor.push({ tx, ty, x: Util.cx(tx), y: Util.cy(ty), h: Util.randInt(4, 7), type: "cactus" });
+    }
+    for (let i = 0; i < 38; i++) {
+      const tx = Util.randInt(1, CFG.COLS - 2), ty = Util.randInt(1, CFG.ROWS - 2);
+      if (this.terrain[this.tkey(tx, ty)] === TERR.SAND && Util.chance(0.6))
+        this.decor.push({ tx, ty, x: Util.cx(tx), y: Util.cy(ty), type: "rock" });
     }
 
     // ---- sectors: 4 x 3 grid -----------------------------------------
@@ -461,55 +466,119 @@ const G = {
     const c = bg.getContext("2d"); c.imageSmoothingEnabled = false;
     const T = CFG.TILE, K = CFG.COLORS;
     const at = (x, y) => (this._inBounds(x, y) ? this.terrain[this.tkey(x, y)] : TERR.SAND);
+    const H = (a, b) => Util.hash(a, b);
+    const isLand = (x, y) => { const tt = at(x, y); return tt !== TERR.WATER && tt !== TERR.BRIDGE; };
 
     for (let y = 0; y < CFG.ROWS; y++) {
       for (let x = 0; x < CFG.COLS; x++) {
         const t = this.terrain[this.tkey(x, y)];
         const X = x * T, Y = y * T;
-        // sand underlay everywhere (so road/scrub edges blend)
-        c.fillStyle = ((x + y) & 1) ? K.sand : K.sand2; c.fillRect(X, Y, T, T);
-        if ((x * 7 + y * 13) % 5 === 0) { c.fillStyle = K.speck; c.fillRect(X + ((x * 5) % T), Y + ((y * 3) % T), 2, 2); }
+        const r1 = H(x, y), r2 = H(x * 3 + 7, y * 5 + 1), r3 = H(x * 13, y * 7 + 3);
+
+        if (t === TERR.CLIFF) {
+          this._tileCliff(c, x, y, X, Y, T, K, at, H);
+          continue;
+        }
+        if (t === TERR.WATER) { this._tileWater(c, x, y, X, Y, T, K, isLand, H); continue; }
+        if (t === TERR.BRIDGE) { this._tileBridge(c, X, Y, T, K); continue; }
+
+        // ---- sandy ground base (sand / scrub / road all sit on it) ----
+        // large-scale dune banding for structure across many tiles
+        const dune = H(Math.floor(x / 5) + 1, Math.floor(y / 4));
+        let base = ((x + y) & 1) ? K.sand : K.sand2;
+        if (dune > 0.72) base = K.speck; else if (dune < 0.26) base = K.sand3;
+        c.fillStyle = base; c.fillRect(X, Y, T, T);
+        // grain speckle
+        if (r1 > 0.55) { c.fillStyle = K.speck; c.fillRect(X + Math.floor(r1 * 90) % (T - 1), Y + Math.floor(r2 * 70) % (T - 1), 1, 1); }
+        if (r2 > 0.78) { c.fillStyle = K.sand3; c.fillRect(X + Math.floor(r2 * 50) % (T - 2), Y + Math.floor(r3 * 40) % (T - 2), 2, 1); }
+        // small embedded pebble with shadow
+        if (r3 < 0.10) {
+          const px = X + 3 + Math.floor(r1 * 7), py = Y + 4 + Math.floor(r2 * 6);
+          c.fillStyle = "rgba(0,0,0,0.18)"; c.fillRect(px, py + 2, 3, 1);
+          c.fillStyle = "#9a7b48"; c.fillRect(px, py, 3, 2); c.fillStyle = "#b89a5e"; c.fillRect(px, py, 1, 1);
+        }
 
         if (t === TERR.SCRUB) {
-          c.fillStyle = K.sand3; c.fillRect(X, Y, T, T);
-          c.fillStyle = K.scrub;
-          for (let i = 0; i < 5; i++) c.fillRect(X + ((i * 5 + y) % (T - 2)), Y + ((i * 7 + x) % (T - 2)), 2, 2);
+          c.fillStyle = "rgba(0,0,0,0.10)"; c.fillRect(X, Y, T, T);
+          for (let i = 0; i < 7; i++) {
+            const hx = H(x * 9 + i, y), hy = H(x, y * 9 + i);
+            c.fillStyle = hy > 0.5 ? K.scrub : K.cactus;
+            c.fillRect(X + Math.floor(hx * (T - 2)), Y + Math.floor(hy * (T - 2)), 2, hy > 0.7 ? 2 : 1);
+          }
         } else if (t === TERR.ROAD) {
           c.fillStyle = K.road; c.fillRect(X, Y, T, T);
+          // worn, dithered asphalt + cracks
+          for (let i = 0; i < 5; i++) { const hx = H(x * 4 + i, y * 6), hy = H(x * 6, y * 4 + i); c.fillStyle = hx > 0.5 ? K.roadLo : "#a8a294"; c.fillRect(X + Math.floor(hx * (T - 1)), Y + Math.floor(hy * (T - 1)), 1, 1); }
           c.fillStyle = K.roadLo; c.fillRect(X, Y, T, 2); c.fillRect(X, Y + T - 2, T, 2);
-          // dashed centre line on the main horizontal lane
-          if (at(x - 1, y) === TERR.ROAD && at(x + 1, y) === TERR.ROAD && (x & 1)) {
-            c.fillStyle = K.roadLine; c.fillRect(X + 4, Y + T / 2 - 1, T - 8, 2);
-          }
-        } else if (t === TERR.WATER) {
-          c.fillStyle = K.water; c.fillRect(X, Y, T, T);
-          c.fillStyle = K.water2; c.fillRect(X, Y + T - 4, T, 4);
-          c.fillStyle = K.waterHi; c.fillRect(X + 3, Y + 4, 5, 1); c.fillRect(X + 9, Y + 9, 4, 1);
-        } else if (t === TERR.BRIDGE) {
-          c.fillStyle = K.water; c.fillRect(X, Y, T, T);
-          c.fillStyle = K.bridge; c.fillRect(X, Y + 1, T, T - 2);
-          c.fillStyle = K.bridgeLo; for (let p = 0; p < T; p += 4) c.fillRect(X + p, Y + 1, 1, T - 2);
-        } else if (t === TERR.CLIFF) {
-          c.fillStyle = K.cliff; c.fillRect(X, Y, T, T);
-          c.fillStyle = K.cliffHi; c.fillRect(X, Y, T, 3);                // lit top
-          if (at(x, y + 1) !== TERR.CLIFF) { c.fillStyle = K.cliffLo; c.fillRect(X, Y + T - 4, T, 4); } // drop shadow
-          if (at(x + 1, y) !== TERR.CLIFF) { c.fillStyle = K.cliffLo; c.fillRect(X + T - 3, Y, 3, T); }
-          if (at(x - 1, y) !== TERR.CLIFF) { c.fillStyle = K.cliffHi; c.fillRect(X, Y, 2, T); }
-          c.fillStyle = K.cliffLo; c.fillRect(X + 4, Y + 6, 2, 2); c.fillRect(X + 9, Y + 10, 2, 2); // pits
+          if (r1 > 0.8) { c.fillStyle = "#6f695b"; c.fillRect(X + Math.floor(r2 * (T - 2)), Y + 2, 1, T - 4); } // crack
+          // worn edge where road meets sand
+          if (isLand(x, y - 1) && at(x, y - 1) !== TERR.ROAD) { c.fillStyle = K.sand2; for (let i = 0; i < T; i += 3) if (H(x + i, y) > 0.5) c.fillRect(X + i, Y, 2, 1); }
+          if (at(x - 1, y) === TERR.ROAD && at(x + 1, y) === TERR.ROAD && (x & 1)) { c.fillStyle = K.roadLine; c.fillRect(X + 4, Y + T / 2 - 1, T - 8, 2); }
         }
+
+        // cast shadow from neighbouring cliffs (depth)
+        if (at(x, y - 1) === TERR.CLIFF) { c.fillStyle = "rgba(0,0,0,0.20)"; c.fillRect(X, Y, T, 4); }
+        if (at(x - 1, y) === TERR.CLIFF) { c.fillStyle = "rgba(0,0,0,0.13)"; c.fillRect(X, Y, 4, T); }
       }
     }
 
-    // cacti decorations
-    for (const d of this.decor) {
-      const X = d.x, Y = d.y;
-      c.fillStyle = "rgba(0,0,0,0.25)"; c.fillRect(X - 2, Y + 3, 6, 2);     // shadow
-      c.fillStyle = K.cactus; c.fillRect(X - 1, Y - d.h, 3, d.h + 3);        // trunk
-      c.fillRect(X - 4, Y - d.h + 2, 3, 2); c.fillRect(X - 4, Y - d.h + 2, 2, 5); // left arm
-      c.fillRect(X + 2, Y - d.h + 4, 3, 2); c.fillRect(X + 3, Y - d.h, 2, 6);     // right arm
+    for (const d of this.decor) this._decor(c, d, K);
+    this.bg = bg;
+  },
+
+  _tileCliff(c, x, y, X, Y, T, K, at, H) {
+    const CL = TERR.CLIFF;
+    c.fillStyle = K.cliff; c.fillRect(X, Y, T, T);
+    // rocky dither texture
+    for (let i = 0; i < 4; i++) { const hx = H(x * 7 + i, y * 5), hy = H(x * 5, y * 7 + i); c.fillStyle = hx > 0.5 ? K.cliffHi : K.cliffLo; c.fillRect(X + Math.floor(hx * (T - 3)), Y + Math.floor(hy * (T - 3)), 2, 2); }
+    // horizontal strata
+    c.fillStyle = K.cliffLo; c.fillRect(X, Y + 5, T, 1); c.fillRect(X, Y + 11, T, 1);
+    c.fillStyle = K.cliffHi; c.fillRect(X, Y + 4, T, 1);
+    // sunlit top / shadowed faces depending on neighbours
+    if (at(x, y - 1) !== CL) { c.fillStyle = K.cliffHi; c.fillRect(X, Y, T, 3); c.fillStyle = "#c2a060"; c.fillRect(X, Y, T, 1); }
+    if (at(x, y + 1) !== CL) { c.fillStyle = K.cliffLo; c.fillRect(X, Y + T - 4, T, 4); c.fillStyle = "rgba(0,0,0,0.25)"; c.fillRect(X, Y + T - 1, T, 1); }
+    if (at(x + 1, y) !== CL) { c.fillStyle = K.cliffLo; c.fillRect(X + T - 3, Y, 3, T); }
+    if (at(x - 1, y) !== CL) { c.fillStyle = K.cliffHi; c.fillRect(X, Y, 2, T); }
+    if (H(x, y) > 0.7) { c.fillStyle = K.cliffLo; c.fillRect(X + 3 + Math.floor(H(x, y) * 8), Y + 2, 1, T - 4); } // crack
+  },
+
+  _tileWater(c, x, y, X, Y, T, K, isLand, H) {
+    c.fillStyle = K.water; c.fillRect(X, Y, T, T);
+    // wave dither + deeper band
+    for (let i = 0; i < 4; i++) { const hx = H(x * 6 + i, y * 3), hy = H(x * 3, y * 6 + i); c.fillStyle = hx > 0.55 ? K.water2 : K.waterHi; c.fillRect(X + Math.floor(hx * (T - 3)), Y + Math.floor(hy * (T - 1)), 3, 1); }
+    c.fillStyle = K.water2; c.fillRect(X, Y + T - 4, T, 4);
+    // foam at the shoreline
+    if (isLand(x, y - 1)) { c.fillStyle = "#cfe6ee"; c.fillRect(X, Y, T, 2); }
+    if (isLand(x, y + 1)) { c.fillStyle = "#a6d2e0"; c.fillRect(X, Y + T - 2, T, 2); }
+    if (isLand(x - 1, y)) { c.fillStyle = "#cfe6ee"; c.fillRect(X, Y, 2, T); }
+    if (isLand(x + 1, y)) { c.fillStyle = "#a6d2e0"; c.fillRect(X + T - 2, Y, 2, T); }
+  },
+
+  _tileBridge(c, X, Y, T, K) {
+    c.fillStyle = K.water; c.fillRect(X, Y, T, T);
+    c.fillStyle = K.bridge; c.fillRect(X, Y + 1, T, T - 2);
+    c.fillStyle = K.bridgeLo; for (let p = 0; p < T; p += 4) c.fillRect(X + p, Y + 1, 1, T - 2);  // planks
+    c.fillStyle = "#8a6a3c"; c.fillRect(X, Y + 1, T, 1);                                          // rail
+    c.fillStyle = "#3a2c18"; c.fillRect(X, Y + T - 2, T, 1);
+    c.fillStyle = "#2a2018"; c.fillRect(X + 1, Y + 2, 1, 1); c.fillRect(X + T - 2, Y + 2, 1, 1);  // bolts
+  },
+
+  _decor(c, d, K) {
+    const X = d.x, Y = d.y;
+    if (d.type === "rock") {                       // boulder cluster
+      c.fillStyle = "rgba(0,0,0,0.22)"; c.fillRect(X - 3, Y + 2, 10, 3);
+      c.fillStyle = "#6b6457"; c.fillRect(X - 3, Y - 2, 8, 6);
+      c.fillStyle = "#7d7567"; c.fillRect(X - 2, Y - 3, 5, 4);
+      c.fillStyle = "#565045"; c.fillRect(X + 1, Y + 1, 4, 3);
+      c.fillStyle = "#8e8676"; c.fillRect(X - 2, Y - 3, 2, 2);
+      c.fillStyle = "#6b6457"; c.fillRect(X + 4, Y, 4, 4); c.fillStyle = "#565045"; c.fillRect(X + 5, Y + 2, 3, 2);
+    } else {                                        // cactus
+      c.fillStyle = "rgba(0,0,0,0.25)"; c.fillRect(X - 2, Y + 3, 6, 2);
+      c.fillStyle = K.cactus; c.fillRect(X - 1, Y - d.h, 3, d.h + 3);
+      c.fillRect(X - 4, Y - d.h + 2, 3, 2); c.fillRect(X - 4, Y - d.h + 2, 2, 5);
+      c.fillRect(X + 2, Y - d.h + 4, 3, 2); c.fillRect(X + 3, Y - d.h, 2, 6);
       c.fillStyle = K.cactusHi; c.fillRect(X - 1, Y - d.h, 1, d.h);
     }
-    this.bg = bg;
   },
 
   _render() {
@@ -755,9 +824,10 @@ const G = {
 
   _dirOf(ang) { return ((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8; },
 
-  _blit(ctx, img, x, y) {
+  _blit(ctx, img, x, y, scale = 1) {
     if (!img) return;
-    ctx.drawImage(img, Math.round(x - img.width / 2), Math.round(y - img.height / 2));
+    const w = img.width * scale, h = img.height * scale;
+    ctx.drawImage(img, Math.round(x - w / 2), Math.round(y - h / 2), Math.round(w), Math.round(h));
   },
 
   _drawUnits(ctx) {
@@ -767,19 +837,20 @@ const G = {
       // soft shadow (pixel oval)
       PX.fillOval(ctx, u.x, u.y + u.radius * 0.55, u.radius * 0.95, u.radius * 0.5, "rgba(0,0,0,0.28)", 2);
 
+      const S = CFG.UNIT_SCALE;
       if (u.kind === "machine") {
         const aim = this._dirOf(u.target ? u.facing : u.hullFacing);
         if (u.immobile) {
-          this._blit(ctx, Sprites.gunBase(palTeam), u.x, u.y);
-          this._blit(ctx, Sprites.gunTurret(palTeam, aim), u.x, u.y);
+          this._blit(ctx, Sprites.gunBase(palTeam), u.x, u.y, S);
+          this._blit(ctx, Sprites.gunTurret(palTeam, aim), u.x, u.y, S);
         } else {
-          this._blit(ctx, Sprites.hull(u.typeKey, palTeam, this._dirOf(u.hullFacing)), u.x, u.y);
-          this._blit(ctx, Sprites.turret(u.typeKey, palTeam, aim), u.x, u.y);
+          this._blit(ctx, Sprites.hull(u.typeKey, palTeam, this._dirOf(u.hullFacing)), u.x, u.y, S);
+          this._blit(ctx, Sprites.turret(u.typeKey, palTeam, aim), u.x, u.y, S);
         }
         if (u.driver) this._bar(ctx, u.x, u.y - u.radius - 6, u.radius * 2 + 4, u.armour / u.maxArmour, "#e8c050");
       } else {
         const frame = u.moving ? (Math.floor(u.animClock) & 1) : 0;
-        this._blit(ctx, Sprites.infantry(u.typeKey, palTeam, this._dirOf(u.facing), frame), u.x, u.y);
+        this._blit(ctx, Sprites.infantry(u.typeKey, palTeam, this._dirOf(u.facing), frame), u.x, u.y, S);
         this._bar(ctx, u.x, u.y - u.radius - 5, u.radius * 2 + 2, u.hp / u.maxHp, "#7d7");
       }
 

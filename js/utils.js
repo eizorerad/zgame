@@ -20,6 +20,15 @@ const Util = {
   pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; },
   chance(p) { return Math.random() < p; },
 
+  // deterministic 0..1 hash from integer coords (stable terrain texture)
+  hash(x, y) {
+    let n = (x | 0) * 374761393 + (y | 0) * 668265263;
+    n = (n ^ (n >> 13));
+    n = Math.imul(n, 1274126177);
+    n = (n ^ (n >> 16)) >>> 0;
+    return n / 4294967296;
+  },
+
   // pixel -> tile coords
   tx(px) { return Math.floor(px / CFG.TILE); },
   ty(py) { return Math.floor(py / CFG.TILE); },
