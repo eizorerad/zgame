@@ -470,16 +470,14 @@ const G = {
   },
 
   _updateCamera(dt) {
-    const sp = 520 * dt, k = Input.keys, m = Input.mouse, edge = 26;
-    let dx = 0, dy = 0;
-    if (k.has("a") || k.has("arrowleft")) dx -= 1;
-    if (k.has("d") || k.has("arrowright")) dx += 1;
-    if (k.has("w") || k.has("arrowup")) dy -= 1;
-    if (k.has("s") || k.has("arrowdown")) dy += 1;
-    if (m.in) {                                  // mouse-at-edge scrolling
-      if (m.x < edge) dx -= 1; else if (m.x > CFG.VIEW_W - edge) dx += 1;
-      if (m.y < edge) dy -= 1; else if (m.y > CFG.VIEW_H - edge) dy += 1;
-    }
+    const sp = 520 * dt, k = Input.keys;
+    // edge-scroll direction persists even after the cursor leaves the canvas
+    let dx = Input.edge.dx, dy = Input.edge.dy;
+    if (k.has("arrowleft")) dx -= 1;
+    if (k.has("arrowright")) dx += 1;
+    if (k.has("arrowup")) dy -= 1;
+    if (k.has("arrowdown")) dy += 1;
+    dx = Util.clamp(dx, -1, 1); dy = Util.clamp(dy, -1, 1);
     if (dx || dy) { this.cam.x += dx * sp; this.cam.y += dy * sp; this.clampCam(); }
   },
 

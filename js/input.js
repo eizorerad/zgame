@@ -29,6 +29,7 @@ const Input = {
   hover: { kind: "move" },    // what a right-click would do at the cursor
 
   keys: new Set(),
+  edge: { dx: 0, dy: 0 },     // current edge-scroll direction (persists when the cursor leaves)
   popupRects: [],             // clickable unit rows in the factory popup (screen space)
 
   init(canvas) {
@@ -52,11 +53,15 @@ const Input = {
 
     canvas.addEventListener("mousemove", e => {
       const p = this._pt(e); this.mouse.x = p.x; this.mouse.y = p.y; this.mouse.in = true;
+      this._setEdge(p, false);
       if (this.drag) { this.drag.x1 = p.x; this.drag.y1 = p.y; }
       this._updateHover(this.world(p), e);
     });
 
-    canvas.addEventListener("mouseleave", () => { this.mouse.in = false; });
+    // when the cursor leaves the (smaller-than-window) canvas, keep scrolling
+    // in the direction it was last pushing — don't freeze the camera
+    canvas.addEventListener("mouseleave", e => { this.mouse.in = false; this._setEdge(this._pt(e), true); });
+    canvas.addEventListener("mouseenter", () => { /* mousemove will recompute edge */ });
 
     window.addEventListener("mouseup", e => {
       if (e.button === 0 && this.drag) { this._leftRelease(this.drag); this.drag = null; }
@@ -81,6 +86,19 @@ const Input = {
 
   // screen -> world coordinate (account for the camera)
   world(p) { return { x: p.x + G.cam.x, y: p.y + G.cam.y }; },
+
+  // compute the edge-scroll direction from a cursor position. On `leaving`
+  // (cursor exiting the canvas) infer the exit side so scrolling continues.
+  _setEdge(p, leaving) {
+    const e = 28; let dx = 0, dy = 0;
+    if (p.x < e) dx = -1; else if (p.x > CFG.VIEW_W - e) dx = 1;
+    if (p.y < e) dy = -1; else if (p.y > CFG.VIEW_H - e) dy = 1;
+    if (leaving && dx === 0 && dy === 0) {
+      if (p.x <= 0) dx = -1; else if (p.x >= CFG.VIEW_W) dx = 1;
+      if (p.y <= 0) dy = -1; else if (p.y >= CFG.VIEW_H) dy = 1;
+    }
+    this.edge = { dx, dy };
+  },
 
   // clicking the minimap recentres the camera there
   _minimapClick(p) {
