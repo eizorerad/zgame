@@ -254,8 +254,6 @@ const UI = {
       redFort: document.getElementById("red-fort"),
       blueMana: document.getElementById("blue-mana"),
       clock: document.getElementById("clock"),
-      buildBtns: document.getElementById("build-buttons"),
-      panel: document.getElementById("factory-panel"),
       overlay: document.getElementById("overlay"),
       overlayTitle: document.getElementById("overlay-title"),
       overlayText: document.getElementById("overlay-text"),
@@ -279,74 +277,9 @@ const UI = {
     e.clock.textContent = Util.fmtTime(G.time);
   },
 
-  _title(text) { const t = this.el.panel.querySelector(".panel-title"); if (t) t.textContent = text; },
-
-  _btn(label, { active, disabled, onclick } = {}) {
-    const b = document.createElement("button");
-    b.className = "build-btn" + (active ? " active" : "");
-    b.textContent = label;
-    if (disabled) b.disabled = true; else b.onclick = onclick;
-    return b;
-  },
-
-  _group(labelText) {
-    const g = document.createElement("div"); g.className = "panel-group";
-    const l = document.createElement("span"); l.className = "group-label"; l.textContent = labelText;
-    g.appendChild(l);
-    this.el.buildBtns.appendChild(g);
-    return g;
-  },
-
-  refreshFactoryPanel() {
-    const wrap = this.el.buildBtns;
-    wrap.innerHTML = "";
-    if (Input.selectedFort) return this._renderFortPanel(Input.selectedFort);
-
-    const f = Input.selectedFactory;
-    if (!f) { this.el.panel.classList.add("empty"); this._title("SELECTED FACTORY — set production"); return; }
-    this.el.panel.classList.remove("empty");
-    this._title(`FACTORY (${f.ftype.toUpperCase()}) — choose what to build`);
-    for (const key of f.spec.keys) {
-      const def = f.spec.table[key];
-      wrap.appendChild(this._btn(`${def.name} (${def.baseTime}s)`, {
-        active: f.queueKey === key, onclick: () => { f.setQueue(key); this.refreshFactoryPanel(); },
-      }));
-    }
-  },
-
-  _renderFortPanel(fort) {
-    this.el.panel.classList.remove("empty");
-    const team = fort.team, mana = Math.floor(G.mana[team]);
-    this._title(`MAIN HQ — MANA ${mana}/${CFG.MANA_MAX}  (mana banks when you lose territory)`);
-
-    // 1) time-based training
-    let g = this._group("Train:");
-    for (const key of FORT_TRAIN_KEYS) {
-      g.appendChild(this._btn(G.unitName(key), {
-        active: fort.trainKey === key, onclick: () => { fort.setTrain(key); this.refreshFactoryPanel(); },
-      }));
-    }
-    // 2) instant build (spend mana)
-    g = this._group("Instant:");
-    for (const key of INSTANT_KEYS) {
-      const cost = G.manaCost(key);
-      g.appendChild(this._btn(`${G.unitName(key)} ⚡${cost}`, {
-        disabled: mana < cost,
-        onclick: () => { G.instantBuild(team, key); this.refreshFactoryPanel(); },
-      }));
-    }
-    // 3) upgrades (spend mana)
-    g = this._group("Upgrade:");
-    for (const def of UPGRADE_DEFS) {
-      const lvl = G.upgrades[team][def.key];
-      const maxed = lvl >= CFG.UPGRADE_MAX;
-      const cost = maxed ? 0 : CFG.UPGRADE_COST[lvl];
-      g.appendChild(this._btn(maxed ? `${def.name} MAX` : `${def.name} L${lvl}→${lvl + 1} ⚡${cost}`, {
-        disabled: maxed || mana < cost,
-        onclick: () => { G.buyUpgrade(team, def.key); this.refreshFactoryPanel(); },
-      }));
-    }
-  },
+  // Building UI is now the in-canvas popups (drawn over the factory / HQ),
+  // so the old bottom DOM panel is gone — nothing here resizes the page.
+  refreshFactoryPanel() {},
 
   showOverlay(title, text, btnLabel, cb) {
     this.el.overlayTitle.textContent = title;

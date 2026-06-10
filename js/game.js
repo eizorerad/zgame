@@ -1104,10 +1104,10 @@ const G = {
     }
   },
 
-  // draw a unit's sprite, scaled to ~icon size, centred at (cx,cy)
-  _unitIcon(ctx, key, cx, cy) {
+  // draw a unit's sprite, scaled to fit `size`px, centred at (cx,cy)
+  _unitIcon(ctx, key, cx, cy, size = 26) {
     const team = "blue", dir = 2;          // facing the camera (south)
-    const blit = (img) => { if (!img) return; const s = 18 / img.width; ctx.drawImage(img, Math.round(cx - img.width * s / 2), Math.round(cy - img.height * s / 2), Math.round(img.width * s), Math.round(img.height * s)); };
+    const blit = (img) => { if (!img) return; const s = size / img.width; ctx.drawImage(img, Math.round(cx - img.width * s / 2), Math.round(cy - img.height * s / 2), Math.round(img.width * s), Math.round(img.height * s)); };
     if (INFANTRY_TYPES[key]) blit(Sprites.infantry(key, team, dir, 0));
     else if (key === "pillbox") { blit(Sprites.gunBase(team)); blit(Sprites.gunTurret(team, dir)); }
     else { blit(Sprites.hull(key, team, dir)); blit(Sprites.turret(key, team, dir)); }
@@ -1139,7 +1139,7 @@ const G = {
   _drawFactoryPopup(ctx) {
     const f = Input.selectedFactory;
     if (!f) return;
-    const keys = f.spec.keys, rowH = 20, W = 184, headH = 16, detailH = 44;
+    const keys = f.spec.keys, rowH = 30, W = 210, headH = 18, detailH = 46;
     const H = headH + keys.length * rowH + detailH + 6;
     const fsx = f.x - this.cam.x, fsy = f.y - this.cam.y;
     let px = Util.clamp(Math.round(fsx - W / 2), 4, CFG.VIEW_W - W - 4);
@@ -1157,13 +1157,13 @@ const G = {
       const over = m.in && m.x >= rx && m.x <= rx + rw && m.y >= ry && m.y <= ry + rh;
       if (over) hover = i;
       const active = f.queueKey === key;
-      ctx.fillStyle = active ? "rgba(77,166,255,0.30)" : over ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.03)";
+      ctx.fillStyle = active ? "rgba(77,166,255,0.30)" : over ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.04)";
       ctx.fillRect(rx, ry, rw, rh);
-      if (active) { ctx.fillStyle = "#4da6ff"; ctx.fillRect(rx, ry, 2, rh); }
-      this._unitIcon(ctx, key, rx + 12, ry + rh / 2);
-      ctx.fillStyle = active ? "#cfe3ff" : "#cfd6dc"; ctx.font = "9px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
-      ctx.fillText(G.unitName(key), rx + 24, ry + rh / 2);
-      ctx.fillStyle = "#86d68a"; ctx.textAlign = "right"; ctx.fillText(G.baseTimeOf(key) + "s", rx + rw - 4, ry + rh / 2); ctx.textAlign = "left";
+      if (active) { ctx.fillStyle = "#4da6ff"; ctx.fillRect(rx, ry, 3, rh); }
+      this._unitIcon(ctx, key, rx + 16, ry + rh / 2, 26);
+      ctx.fillStyle = active ? "#cfe3ff" : "#cfd6dc"; ctx.font = "10px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillText(G.unitName(key), rx + 32, ry + rh / 2);
+      ctx.fillStyle = "#86d68a"; ctx.textAlign = "right"; ctx.fillText(G.baseTimeOf(key) + "s", rx + rw - 6, ry + rh / 2); ctx.textAlign = "left";
       Input.popupRects.push({ x: rx, y: ry, w: rw, h: rh, act: () => f.setQueue(key) });
       yy += rowH;
     });
@@ -1177,7 +1177,7 @@ const G = {
     const fort = Input.selectedFort;
     if (!fort) return;
     const team = fort.team, mana = Math.floor(this.mana[team]);
-    const W = 220, cell = 24, headH = 18, labH = 11, detailH = 44;
+    const W = 268, cell = 34, headH = 20, labH = 13, detailH = 46;
     const cols = Math.floor((W - 8) / cell);
     const trainRows = Math.ceil(FORT_TRAIN_KEYS.length / cols);
     const instRows = Math.ceil(INSTANT_KEYS.length / cols);
@@ -1211,13 +1211,13 @@ const G = {
         const cost = this.manaCost(key);
         const cantPay = mode === "instant" && mana < cost;
         const active = mode === "train" && fort.trainKey === key;
-        ctx.fillStyle = active ? "rgba(77,166,255,0.30)" : over ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.05)";
+        ctx.fillStyle = active ? "rgba(77,166,255,0.30)" : over ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)";
         ctx.fillRect(gx, gy, rw, rh);
-        if (active) { ctx.fillStyle = "#4da6ff"; ctx.fillRect(gx, gy, rw, 2); }
-        this._unitIcon(ctx, key, gx + rw / 2, gy + rh / 2 - 2);
+        if (active) { ctx.fillStyle = "#4da6ff"; ctx.fillRect(gx, gy, rw, 3); }
+        this._unitIcon(ctx, key, gx + rw / 2, gy + rh / 2 - 3, 26);
         if (mode === "instant") {
-          ctx.fillStyle = cantPay ? "#5a4a6a" : "#b98aff"; ctx.font = "7px monospace"; ctx.textAlign = "center";
-          ctx.fillText(String(cost), gx + rw / 2, gy + rh - 3); ctx.textAlign = "left";
+          ctx.fillStyle = cantPay ? "#5a4a6a" : "#d8c2ff"; ctx.font = "8px monospace"; ctx.textAlign = "center";
+          ctx.fillText(String(cost), gx + rw / 2, gy + rh - 2); ctx.textAlign = "left";
           if (cantPay) { ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(gx, gy, rw, rh); }
           else Input.popupRects.push({ x: gx, y: gy, w: rw, h: rh, act: () => this.instantBuild(team, key) });
         } else {
