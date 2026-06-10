@@ -31,6 +31,10 @@ const Input = {
   keys: new Set(),
   edge: { dx: 0, dy: 0 },     // current edge-scroll direction (persists when the cursor leaves)
   popupRects: [],             // clickable unit rows in the factory popup (screen space)
+  groups: {},                 // control groups: digit -> array of units
+  _lastGroupKey: null,        // for double-tap-to-centre
+  _lastGroupTime: 0,
+  _lastClick: { t: 0, id: 0 },// for double-click select-all-of-type
 
   init(canvas) {
     this.canvas = canvas;
@@ -40,6 +44,7 @@ const Input = {
     canvas.addEventListener("contextmenu", e => e.preventDefault());
 
     canvas.addEventListener("mousedown", e => {
+      Sound.init();                                   // first gesture unlocks audio
       const p = this._pt(e); this.mouse.x = p.x; this.mouse.y = p.y; this.mouse.in = true;
       if (e.button === 0) {
         if (this._minimapClick(p)) return;            // jump the camera
@@ -47,6 +52,7 @@ const Input = {
         if (this.attackMoveArmed) { this._issueAttackMove(this.world(p)); this.attackMoveArmed = false; return; }
         this.drag = { x0: p.x, y0: p.y, x1: p.x, y1: p.y, additive: e.shiftKey };
       } else if (e.button === 2) {
+        if (this._minimapOrder(p, e)) return;         // right-click the minimap = order there
         this._rightClick(this.world(p), e);
       }
     });
@@ -68,14 +74,66 @@ const Input = {
     });
 
     window.addEventListener("keydown", e => {
+      Sound.init();
       const k = e.key.toLowerCase();
       this.keys.add(k);
+      // control groups: Ctrl+digit assigns, digit selects, double-tap centres
+      if (k >= "1" && k <= "9") {
+        if (e.ctrlKey || e.metaKey) { this._assignGroup(k); e.preventDefault(); }
+        else this._recallGroup(k);
+        return;
+      }
+      if (e.ctrlKey || e.metaKey) return;             // don't eat browser shortcuts
       if (k === "a") this.attackMoveArmed = !this.attackMoveArmed;
       else if (k === "h") { this._forSelected(u => u.orderHold()); this.attackMoveArmed = false; }
       else if (k === "s") { this._forSelected(u => u.stop()); this.attackMoveArmed = false; }
+      else if (k === "u") this._unloadSelected();
+      else if (k === "p") { G.paused = !G.paused; }
+      else if (k === "m") { Sound.toggleMute(); }
+      else if (k === "+" || k === "=") G.speedMult = Math.min(2, (G.speedMult || 1) * 2);
+      else if (k === "-" || k === "_") G.speedMult = Math.max(0.5, (G.speedMult || 1) / 2);
       else if (k === "escape") { this._clearSelection(); this.selectedFactory = null; this.selectedFort = null; this.attackMoveArmed = false; UI.refreshFactoryPanel(); }
     });
     window.addEventListener("keyup", e => this.keys.delete(e.key.toLowerCase()));
+  },
+
+  /* ---- control groups -------------------------------------------------- */
+  _assignGroup(k) {
+    const sel = G.units.filter(u => u.selected && u.alive);
+    if (sel.length) { this.groups[k] = sel.slice(); Sound.play("select"); }
+  },
+
+  _recallGroup(k) {
+    const g = (this.groups[k] || []).filter(u => u.alive && u.team === G.player && u.crewed);
+    this.groups[k] = g;
+    if (!g.length) return;
+    this._clearSelection();
+    for (const u of g) u.selected = true;
+    this.selectedFactory = null; this.selectedFort = null;
+    Sound.play("select");
+    // double-tap: jump the camera to the group
+    const now = performance.now();
+    if (this._lastGroupKey === k && now - this._lastGroupTime < 450) {
+      let cx = 0, cy = 0;
+      for (const u of g) { cx += u.x; cy += u.y; }
+      G.centerCam(cx / g.length, cy / g.length);
+    }
+    this._lastGroupKey = k; this._lastGroupTime = now;
+  },
+
+  // unload every selected transport's passengers
+  _unloadSelected() {
+    for (const u of G.units) {
+      if (!u.selected || !u.alive || !u.cargo || !u.cargo.length) continue;
+      for (const c of u.cargo) {
+        const s = G.freeSpotNear(u.x + Util.rand(-16, 16), u.y + u.radius + 10);
+        const inf = new Unit("infantry", c.typeKey, c.team, s.x, s.y);
+        inf.hp = c.hp; inf.maxHp = c.maxHp; inf.kills = c.kills; inf.rank = c.rank;
+        G.units.push(inf);
+      }
+      u.cargo.length = 0;
+      Sound.playAt("unload", u.x, u.y);
+    }
   },
 
   _pt(e) {
@@ -105,6 +163,21 @@ const Input = {
     const mm = G.mm;
     if (!mm || p.x < mm.ox || p.x > mm.ox + mm.w || p.y < mm.oy || p.y > mm.oy + mm.h) return false;
     G.centerCam((p.x - mm.ox) / mm.w * G.worldW(), (p.y - mm.oy) / mm.h * G.worldH());
+    return true;
+  },
+
+  // right-clicking the minimap orders the selection to that world point
+  _minimapOrder(p, e) {
+    const mm = G.mm;
+    if (!mm || p.x < mm.ox || p.x > mm.ox + mm.w || p.y < mm.oy || p.y > mm.oy + mm.h) return false;
+    const sel = G.units.filter(u => u.selected && u.alive);
+    if (!sel.length) return true;
+    const wx = (p.x - mm.ox) / mm.w * G.worldW();
+    const wy = (p.y - mm.oy) / mm.h * G.worldH();
+    this._formMove(sel, wx, wy, this.attackMoveArmed, e.shiftKey);
+    this.attackMoveArmed = false;
+    G.fx.push(new CommandMarker(wx, wy, "move"));
+    Sound.play("order");
     return true;
   },
 
@@ -156,7 +229,20 @@ const Input = {
     }
     const u = G.unitAt(p.x, p.y);
     if (!d.additive) this._clearSelection();
-    if (u && u.team === G.player && u.crewed) u.selected = !d.additive ? true : !u.selected;
+    if (u && u.team === G.player && u.crewed) {
+      // double-click: select every unit of this type currently on screen
+      const now = performance.now();
+      if (this._lastClick.id === u.id && now - this._lastClick.t < 400) {
+        for (const o of G.units) {
+          if (o.alive && o.crewed && o.team === G.player && o.typeKey === u.typeKey &&
+              G._inView(o.x, o.y, 0)) o.selected = true;
+        }
+      } else {
+        u.selected = !d.additive ? true : !u.selected;
+      }
+      this._lastClick = { t: now, id: u.id };
+      Sound.play("select");
+    }
     this.selectedFactory = null; this.selectedFort = null;
     UI.refreshFactoryPanel();
   },
@@ -168,46 +254,87 @@ const Input = {
     if (depot && depot.team === G.player) {
       depot.rally = { x: p.x, y: p.y };
       G.fx.push(new CommandMarker(p.x, p.y, "rally"));
+      Sound.play("order");
       return;
     }
     const sel = G.units.filter(u => u.selected && u.alive);
     if (!sel.length) return;
+    const queued = e.shiftKey;          // shift: append instead of replacing
+
+    // friendly transport with room? selected infantry climbs aboard
+    const apc = this._transportAt(p);
+    if (apc && sel.some(u => u.kind === "infantry" && u !== apc)) {
+      for (const u of sel) {
+        if (u === apc) continue;
+        if (u.kind === "infantry") {
+          if (queued && u.order !== "idle") u.queueOrder({ kind: "board", entity: apc });
+          else u.orderBoard(apc);
+        } else if (!queued) u.orderMove(p.x, p.y);
+      }
+      G.fx.push(new CommandMarker(apc.x, apc.y, "rally"));
+      Sound.play("order");
+      return;
+    }
 
     const enemy = this._enemyAt(p);
     if (enemy) {
-      for (const u of sel) u.orderAttack(enemy);
+      for (const u of sel) {
+        if (queued && u.order !== "idle") u.queueOrder({ kind: "attack", entity: enemy });
+        else u.orderAttack(enemy);
+      }
       G.fx.push(new CommandMarker(enemy.x, enemy.y, "attack"));
+      Sound.play("order");
       return;
     }
     // capture: right-click on an enemy/neutral sector sends units onto its flag
     const sec = Sectors.sectorAt(p.x, p.y);
     if (sec && sec.flag && sec.owner !== G.player) {
-      this._formMove(sel, sec.flag.x, sec.flag.y, false);
+      this._formMove(sel, sec.flag.x, sec.flag.y, false, queued);
       G.fx.push(new CommandMarker(sec.flag.x, sec.flag.y, "capture"));
+      Sound.play("order");
       return;
     }
     // plain move
-    this._formMove(sel, p.x, p.y, false);
+    this._formMove(sel, p.x, p.y, false, queued);
     G.fx.push(new CommandMarker(p.x, p.y, "move"));
+    Sound.play("order");
   },
 
   _issueAttackMove(p) {
     const sel = G.units.filter(u => u.selected && u.alive);
     if (!sel.length) return;
-    this._formMove(sel, p.x, p.y, true);
+    this._formMove(sel, p.x, p.y, true, this.keys.has("shift"));
     G.fx.push(new CommandMarker(p.x, p.y, "amove"));
+    Sound.play("order");
   },
 
-  // spread units into a small grid so they don't pile on one tile
-  _formMove(sel, px, py, attackMove) {
+  // spread units into a small grid so they don't pile on one tile; group
+  // moves are capped to the slowest member's speed so they arrive together
+  _formMove(sel, px, py, attackMove, queued) {
     const n = sel.length, cols = Math.ceil(Math.sqrt(n));
+    let cap = null;
+    if (n > 1) {
+      cap = Infinity;
+      for (const u of sel) if (u.speed > 0) cap = Math.min(cap, u.speed);  // immobile guns don't freeze the group
+      if (cap === Infinity) cap = null;
+    }
     let i = 0;
     for (const u of sel) {
       const ox = (i % cols - cols / 2) * 14, oy = (Math.floor(i / cols) - cols / 2) * 14;
-      if (attackMove) u.orderAttackMove(px + ox, py + oy);
-      else u.orderMove(px + ox, py + oy);
+      const kind = attackMove ? "amove" : "move";
+      if (queued && u.order !== "idle") u.queueOrder({ kind, x: px + ox, y: py + oy, speedCap: cap });
+      else if (attackMove) u.orderAttackMove(px + ox, py + oy, cap);
+      else u.orderMove(px + ox, py + oy, cap);
       i++;
     }
+  },
+
+  // a crewed friendly APC with spare seats under the cursor
+  _transportAt(p) {
+    const u = G.unitAt(p.x, p.y);
+    if (u && u.alive && u.team === G.player && u.cargo && u.driver &&
+        u.cargo.length < u.stats.transport) return u;
+    return null;
   },
 
   _enemyAt(p) {
@@ -230,6 +357,10 @@ const Input = {
     }
     if (this.attackMoveArmed) { this.hover = { kind: "amove" }; return; }
     if (this._enemyAt(p)) { this.hover = { kind: "attack" }; return; }
+    const apc = this._transportAt(p);
+    if (apc && G.units.some(u => u.selected && u.alive && u.kind === "infantry" && u !== apc)) {
+      this.hover = { kind: "board" }; return;
+    }
     const sec = Sectors.sectorAt(p.x, p.y);
     if (sec && sec.flag && sec.owner !== G.player) { this.hover = { kind: "capture" }; return; }
     this.hover = { kind: "move" };

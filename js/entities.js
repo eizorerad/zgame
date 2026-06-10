@@ -46,6 +46,7 @@ class Unit {
       this.maxArmour = this.stats.armour;
       this.driver = team ? { team } : null;   // pre-crewed when produced
       this.immobile = !!this.stats.immobile;
+      if (this.stats.transport) this.cargo = [];  // APC passenger bay
     }
 
     // order / movement
@@ -62,10 +63,17 @@ class Unit {
     this.moveGoalY = null;
     this.wallTarget = null;      // {tx,ty} wall we're clearing
     this.repathTimer = 0;
+    this.orderQueue = [];        // shift-queued follow-up orders
+    this.boardTarget = null;     // friendly APC this infantry is boarding
+    this.speedCap = null;        // group move: match the slowest member
+    this.vx = 0; this.vy = 0;    // measured velocity (ballistic lead prediction)
 
     // combat
     this.cooldown = 0;
     this.aggro = this.stats.aggro || CFG.DEFAULT_AGGRO;
+    this.recoil = 0;             // turret recoil timer (visual)
+    this.smokeTimer = 0;         // damaged-vehicle smoke emitter
+    this._snipeHits = 0;         // sniper: hits landed on crewed vehicles
   }
 
   get team() {
@@ -116,19 +124,21 @@ class Unit {
   /* ---- orders -------------------------------------------------------- */
   // plain move: head to the point, "go through" — fire at anything that comes
   // into weapon range while passing, but never chase off-course.
-  orderMove(px, py) {
+  orderMove(px, py, speedCap) {
     this.order = "move";
-    this.target = null; this.commandAttack = null;
+    this.target = null; this.commandAttack = null; this.boardTarget = null;
     this.holdPosition = false; this.chase = false; this.attackMove = false;
+    this.speedCap = speedCap || null;
     this.moveGoalX = px; this.moveGoalY = py;
     this._setGoal(px, py);
   }
 
   // attack-move: advance to the point AND break off to hunt any enemy seen.
-  orderAttackMove(px, py) {
+  orderAttackMove(px, py, speedCap) {
     this.order = "amove";
-    this.target = null; this.commandAttack = null;
+    this.target = null; this.commandAttack = null; this.boardTarget = null;
     this.holdPosition = false; this.chase = true; this.attackMove = true;
+    this.speedCap = speedCap || null;
     this.moveGoalX = px; this.moveGoalY = py;
     this._setGoal(px, py);
   }
@@ -139,25 +149,64 @@ class Unit {
     this.commandAttack = entity;
     this.target = entity;
     this.holdPosition = false; this.chase = true; this.attackMove = false;
+    this.boardTarget = null; this.speedCap = null;
     this.wallTarget = null;
     this.moveGoalX = this.moveGoalY = null;
+  }
+
+  // walk to a friendly APC and climb in (completed in update())
+  orderBoard(apc) {
+    this.order = "board";
+    this.target = null; this.commandAttack = null;
+    this.holdPosition = false; this.chase = false; this.attackMove = false;
+    this.boardTarget = apc; this.speedCap = null;
+    this.moveGoalX = apc.x; this.moveGoalY = apc.y;
+    this._setGoal(apc.x, apc.y);
   }
 
   orderHold() {
     this.holdPosition = true;
     this.order = "hold";
-    this.chase = false; this.attackMove = false;
+    this.chase = false; this.attackMove = false; this.boardTarget = null;
     this.path = []; this.wpx = this.wpy = null;
     this.target = null; this.commandAttack = null;
     this.moveGoalX = this.moveGoalY = null;
+    this.orderQueue.length = 0;
   }
 
+  // user stop: drop everything, including any queued follow-up orders
   stop() {
+    this._halt();
+    this.orderQueue.length = 0;
+  }
+
+  _halt() {
     this.order = "idle";
-    this.chase = false; this.attackMove = false;
+    this.chase = false; this.attackMove = false; this.boardTarget = null;
     this.path = []; this.wpx = this.wpy = null;
     this.goalTx = this.goalTy = null;
     this.moveGoalX = this.moveGoalY = null;
+    this.speedCap = null;
+  }
+
+  // reached a destination: run the next queued order, if any
+  _arrive() {
+    this._halt();
+    this._nextQueued();
+  }
+
+  // append a follow-up order (shift-click); executes when the current one ends
+  queueOrder(o) { this.orderQueue.push(o); }
+
+  _nextQueued() {
+    const o = this.orderQueue.shift();
+    if (!o) return false;
+    if (o.kind === "amove") this.orderAttackMove(o.x, o.y, o.speedCap);
+    else if (o.kind === "attack" && o.entity && o.entity.alive) this.orderAttack(o.entity);
+    else if (o.kind === "board" && o.entity && o.entity.alive) this.orderBoard(o.entity);
+    else if (o.kind === "move") this.orderMove(o.x, o.y, o.speedCap);
+    else return this._nextQueued();      // stale entry — try the next one
+    return true;
   }
 
   _setGoal(px, py) {
@@ -196,10 +245,42 @@ class Unit {
   update(dt) {
     if (!this.alive) return;
     if (this.cooldown > 0) this.cooldown -= dt;
+    if (this.recoil > 0) this.recoil -= dt;
     this.moving = false;
+    this.vx = 0; this.vy = 0;
 
     // Empty machines just sit there waiting to be crewed.
     if (this.kind === "machine" && !this.driver) return;
+
+    // Damaged vehicles trail smoke (grey when hurt, black + embers when dying)
+    if (this.kind === "machine" && !this.immobile && this.armour < this.maxArmour * 0.5) {
+      this.smokeTimer -= dt;
+      if (this.smokeTimer <= 0) {
+        const critical = this.armour < this.maxArmour * 0.25;
+        this.smokeTimer = critical ? 0.10 : 0.22;
+        G.fx.push(new SmokePuff(this.x + Util.rand(-3, 3), this.y + Util.rand(-3, 3), critical));
+      }
+    }
+
+    // Boarding a friendly APC: walk up, climb in (this unit leaves the world).
+    if (this.boardTarget) {
+      const a = this.boardTarget;
+      if (!a.alive || !a.driver || a.team !== this.team || a.cargo.length >= a.stats.transport) {
+        this.boardTarget = null; this._arrive();
+      } else if (Util.dist(this.x, this.y, a.x, a.y) <= this.radius + a.radius + 3) {
+        a.cargo.push({ typeKey: this.typeKey, team: this.team, hp: this.hp, maxHp: this.maxHp, kills: this.kills, rank: this.rank });
+        this.alive = false;
+        Sound.playAt("crew", a.x, a.y);
+        return;
+      } else {
+        // APCs can move — refresh the goal if it drove off
+        if (Util.dist(a.x, a.y, this.moveGoalX, this.moveGoalY) > CFG.TILE * 2) {
+          this.moveGoalX = a.x; this.moveGoalY = a.y; this._setGoal(a.x, a.y);
+        }
+        this._followPath(dt);
+        return;
+      }
+    }
 
     // Attacking a wall to clear a path.
     if (this.wallTarget) {
@@ -224,10 +305,11 @@ class Unit {
       return;
     }
 
-    // Pursue mode (attack / attack-move): chase the target, fire when in range.
+    // Pursue mode (attack / attack-move): chase the target, fire when in range
+    // AND in sight — without line-of-sight keep closing in until it clears.
     if (pursue && tgt && tgt.alive) {
       const d = Util.dist(this.x, this.y, tgt.x, tgt.y);
-      if (d <= this.range) {
+      if (d <= this.range && this._canHit(tgt)) {
         this.faceTo(tgt.x, tgt.y);
         if (d >= minR) this._fire(tgt);     // too close -> can't engage
         return;
@@ -241,10 +323,16 @@ class Unit {
     // target that is already in weapon range — never chase off-course.
     if (tgt && tgt.alive) {
       const d = Util.dist(this.x, this.y, tgt.x, tgt.y);
-      if (d <= this.range && d >= minR) { this.faceTo(tgt.x, tgt.y); this._fire(tgt); }
+      if (d <= this.range && d >= minR && this._canHit(tgt)) { this.faceTo(tgt.x, tgt.y); this._fire(tgt); }
     }
     this._followPath(dt);
     this._maybeRepair(dt);
+  }
+
+  // direct-fire weapons need line-of-sight; rockets arc over obstacles
+  _canHit(tgt) {
+    if (this.dtype === "rocket") return true;
+    return G.hasLOS(this.x, this.y, tgt.x, tgt.y);
   }
 
   _followPath(dt) {
@@ -252,25 +340,38 @@ class Unit {
     const dx = this.wpx - this.x, dy = this.wpy - this.y;
     const d = Math.hypot(dx, dy);
     if (d < 2) { this.advanceWaypoint(); return; }
-    // terrain modifies ground speed (roads fast, scrub slow)
+    // terrain modifies ground speed (roads fast, scrub slow); a group move
+    // caps everyone at the slowest member so formations arrive together
     const terr = G.terrainAt(this.x, this.y);
-    const sp = this.speed * (TERRAIN_SPEED[terr] ?? 1) * dt;
+    const base = this.speedCap ? Math.min(this.speed, this.speedCap) : this.speed;
+    const sp = base * (TERRAIN_SPEED[terr] ?? 1) * dt;
     const nx = this.x + (dx / d) * sp;
     const ny = this.y + (dy / d) * sp;
     this.hullFacing = Math.atan2(dy, dx);
     if (!this.target) this.facing = this.hullFacing;   // turret rests forward
     // block on freshly-changed walls
     if (G.tilePassable(Util.tx(nx), Util.ty(ny))) {
+      this.vx = (nx - this.x) / dt; this.vy = (ny - this.y) / dt;
       this.x = nx; this.y = ny;
       this.moving = true;
       this.animClock += dt * 9;
-      if (this.isVehicle()) this._crush();
+      if (this.isVehicle()) { this._crush(); this._layTracks(sp); }
     } else {
       this.recomputePath();
     }
     if (this.path.length === 0 && Math.hypot(this.wpx - this.x, this.wpy - this.y) < 2) {
-      this.stop();
+      this._arrive();
     }
+  }
+
+  // moving vehicles leave fading tread marks on soft ground
+  _layTracks(step) {
+    this._trackDist = (this._trackDist || 0) + step;
+    if (this._trackDist < 7) return;
+    this._trackDist = 0;
+    const terr = G.terrainAt(this.x, this.y);
+    if (terr !== TERR.SAND && terr !== TERR.SCRUB) return;
+    G.addTrack(this.x, this.y, this.hullFacing, this.radius * 0.55);
   }
 
   // tanks/jeeps flatten enemy infantry they drive over
@@ -318,9 +419,18 @@ class Unit {
   _fire(target) {
     if (this.cooldown > 0) return;
     this.cooldown = this.fireCooldown;
-    const sniper = this.isSniper() && Util.chance(this.stats.snipeChance || 0);
+    // sniper crew kills are deterministic: every Nth hit on a crewed vehicle
+    // drops the driver (veterans need one hit fewer)
+    let sniper = false;
+    if (this.isSniper() && target.kind === "machine" && target.driver) {
+      const every = Math.max(2, CFG.SNIPE_CREW_EVERY - (this.rank >= 2 ? 1 : 0));
+      this._snipeHits++;
+      sniper = this._snipeHits % every === 0;
+    }
     G.spawnProjectile(this, target, sniper);
     G.fx.push(new Muzzle(this.x, this.y, this.facing, this.team));
+    if (this.dtype === "cannon" || this.dtype === "rocket") this.recoil = 0.12;
+    Sound.playAt("shoot_" + this.dtype, this.x, this.y);
   }
 
   faceTo(px, py) { this.facing = Math.atan2(py - this.y, px - this.x); }
@@ -334,6 +444,8 @@ class Unit {
     // defence upgrades reduce incoming damage
     const up = G.upgrades && G.upgrades[this.team];
     if (up) { const lvl = this.kind === "infantry" ? up.infDef : up.vehDef; amount = amount / (1 + lvl * CFG.UPGRADE_STEP); }
+    // an attack on the player's units pings the minimap
+    if (this.team === G.player && attacker && attacker.team !== G.player) G.ping(this.x, this.y);
     if (this.kind === "infantry") {
       this.hp -= amount;
       if (this.hp <= 0) this.die(attacker);
@@ -344,6 +456,7 @@ class Unit {
       // Sniper bypasses armour and kills the driver. Machine survives, empty.
       this.ejectDriver(true);
       G.fx.push(new Spark(this.x, this.y, "#fff"));
+      Sound.playAt("crewkill", this.x, this.y);
       if (attacker && attacker.gainKill) attacker.gainKill();   // crew kill counts
       return;
     }
@@ -357,12 +470,27 @@ class Unit {
       this.order = "idle";
       this.path = []; this.wpx = this.wpy = null;
       this.target = null; this.selected = false;
+      this.orderQueue.length = 0;
+      // passengers bail out around the stalled vehicle (keeping their team)
+      if (this.cargo && this.cargo.length) {
+        for (const c of this.cargo) {
+          const s = G.freeSpotNear(this.x + Util.rand(-14, 14), this.y + Util.rand(-14, 14));
+          const u = new Unit("infantry", c.typeKey, c.team, s.x, s.y);
+          u.hp = c.hp; u.maxHp = c.maxHp; u.kills = c.kills; u.rank = c.rank;
+          G.units.push(u);
+        }
+        this.cargo.length = 0;
+      }
     }
   }
 
   die(attacker) {
     this.alive = false;
-    G.fx.push(new Explosion(this.x, this.y, this.kind === "machine" ? 18 : 9));
+    // a destroyed transport takes its passengers with it
+    const cargoLost = this.cargo ? this.cargo.length : 0;
+    const size = this.kind === "machine" ? 18 + cargoLost * 3 : 9;
+    if (this.kind === "infantry" && attacker) G.addCorpse(this);
+    G.fx.push(new Explosion(this.x, this.y, size));
     if (attacker && attacker.alive && attacker.gainKill) attacker.gainKill();
   }
 }
@@ -514,7 +642,14 @@ class Fort {
 }
 
 /* -------------------------------------------------------------------------
- * Projectile — flies from attacker to target, then delivers damage.
+ * Projectile — delivers damage in one of two ways:
+ *
+ *   HOMING    (bullet / flame / snipe): tracks the target and always connects
+ *             — small-arms fire is an exchange of stats, as before.
+ *   BALLISTIC (cannon / rocket): aimed at a PREDICTED POINT with a little
+ *             scatter. The shell flies there and explodes — fast units can
+ *             dodge, clumps eat splash, and friendly fire is real. Rockets
+ *             arc visually and over obstacles; cannons need line-of-sight.
  * ---------------------------------------------------------------------- */
 class Projectile {
   constructor(attacker, target, sniper) {
@@ -524,16 +659,49 @@ class Projectile {
     this.target = target;
     this.dmg = attacker.dmg !== undefined ? attacker.dmg : attacker.stats.dmg;
     this.sniper = sniper;
-    this.speed = sniper ? 700 : 320;
+    this.dtype = attacker.dtype;
+    this.speed = sniper ? CFG.PROJ_SPEED.snipe : (CFG.PROJ_SPEED[this.dtype] || 320);
     this.alive = true;
     this.tx = target.x; this.ty = target.y;
+
+    this.ballistic = !sniper && !target.isWall && (this.dtype === "cannon" || this.dtype === "rocket");
+    if (this.ballistic) {
+      // lead the target by its current velocity, then add aim scatter
+      const d0 = Util.dist(this.x, this.y, target.x, target.y);
+      const eta = d0 / this.speed;
+      let ax = target.x + (target.vx || 0) * eta;
+      let ay = target.y + (target.vy || 0) * eta;
+      const err = d0 * CFG.BALLISTIC_SCATTER * (this.dtype === "rocket" ? 1.5 : 1);
+      const a = Util.rand(0, Math.PI * 2), r = Util.rand(0, err);
+      this.tx = ax + Math.cos(a) * r; this.ty = ay + Math.sin(a) * r;
+      this.total = Math.max(1, Util.dist(this.x, this.y, this.tx, this.ty));
+      this.traveled = 0;
+      this.arc = this.dtype === "rocket";   // drawn with a parabolic height
+      this._trail = 0;
+    }
   }
+
+  // visual height of an arcing rocket at its current progress
+  arcHeight() {
+    if (!this.arc) return 0;
+    const p = Util.clamp(this.traveled / this.total, 0, 1);
+    return Math.sin(p * Math.PI) * this.total * 0.16;
+  }
+
   update(dt) {
     const t = this.target;
-    if (t && t.alive !== false && !t.isWall) { this.tx = t.x; this.ty = t.y; }
+    // homing shots track a live target; ballistic shots fly to a fixed point
+    if (!this.ballistic && t && t.alive !== false && !t.isWall) { this.tx = t.x; this.ty = t.y; }
     const dx = this.tx - this.x, dy = this.ty - this.y;
     const d = Math.hypot(dx, dy);
     const step = this.speed * dt;
+    if (this.ballistic) {
+      this.traveled += step;
+      if (this.arc) {
+        this._trail += dt;
+        if (this._trail > 0.04) { this._trail = 0; G.fx.push(new SmokePuff(this.x, this.y - this.arcHeight(), false, 0.4)); }
+      }
+    }
     if (d <= step) {
       this._hit();
       this.alive = false;
@@ -542,6 +710,7 @@ class Projectile {
     this.x += (dx / d) * step;
     this.y += (dy / d) * step;
   }
+
   _hit() {
     const t = this.target;
     if (t && t.isWall) {
@@ -549,15 +718,17 @@ class Projectile {
       G.fx.push(new Spark(this.tx, this.ty, "#caa"));
       return;
     }
+    if (this.ballistic) {
+      // explode at the impact point: full damage at the centre falling off to
+      // the edge; friends in the blast take CFG.SPLASH_FF of it
+      const sp = SPLASH[this.dtype] || { r: 16 };
+      G.splashAt(this.tx, this.ty, sp.r, this.dmg, this.attacker);
+      G.fx.push(new Explosion(this.tx, this.ty, this.dtype === "rocket" ? 10 : 7));
+      return;
+    }
     if (t && t.alive) {
       t.applyDamage(this.dmg, this.attacker, this.sniper);
       G.fx.push(new Spark(t.x, t.y, this.sniper ? "#fff" : "#ffcf5b"));
-      // explosive impacts splash reduced damage around the hit point
-      const sp = this.attacker && SPLASH[this.attacker.dtype];
-      if (sp) {
-        G.splashDamage(t.x, t.y, sp.r, this.dmg * sp.f, this.attacker, t);
-        if (this.attacker.dtype === "rocket") G.fx.push(new Explosion(t.x, t.y, 8));
-      }
     }
   }
 }
@@ -606,6 +777,7 @@ class Explosion {
 
     this.maxLife = 1.5 + size * 0.02;
     G.scorch.push({ x, y, r: size * 0.7, t: 0, life: 7 });
+    Sound.playAt("explosion", x, y, size * 0.5);
   }
 
   update(dt) {
@@ -641,4 +813,21 @@ class RankUp {
 class CommandMarker {
   constructor(x, y, kind) { this.x = x; this.y = y; this.kind = kind; this.t = 0; this.life = 0.6; this.alive = true; }
   update(dt) { this.t += dt; if (this.t >= this.life) this.alive = false; }
+}
+// a single rising smoke puff (damaged vehicles, rocket trails)
+class SmokePuff {
+  constructor(x, y, dark, scale = 1) {
+    this.x = x; this.y = y; this.dark = dark; this.scale = scale;
+    this.t = 0; this.life = dark ? 1.0 : 0.8; this.alive = true;
+    this.drift = Util.rand(-4, 4);
+  }
+  update(dt) { this.t += dt; this.y -= dt * 14; this.x += this.drift * dt; if (this.t >= this.life) this.alive = false; }
+}
+// floating combat text ("+45 mana", "CREW KILLED")
+class FloatText {
+  constructor(x, y, text, color) {
+    this.x = x; this.y = y; this.text = text; this.color = color;
+    this.t = 0; this.life = 1.4; this.alive = true;
+  }
+  update(dt) { this.t += dt; this.y -= dt * 14; if (this.t >= this.life) this.alive = false; }
 }

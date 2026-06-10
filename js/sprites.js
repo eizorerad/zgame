@@ -15,11 +15,11 @@ const Sprites = {
   cache: {},
 
   build() {
-    // infantry (2 walk frames each)
+    // infantry (4 walk frames each: stride, pass, stride, pass)
     for (const type of Object.keys(INFANTRY_TYPES))
       for (const team of ["blue", "red"])
         this.cache["inf:" + type + ":" + team] =
-          bake(20, (g, f) => drawInfantry(g, CFG.TEAM_PAL[team], type, f), 2);
+          bake(20, (g, f) => drawInfantry(g, CFG.TEAM_PAL[team], type, f), 4);
 
     // vehicle hulls + turrets (1 frame, 8 dirs), all three palettes
     for (const type of Object.keys(VEHICLE_TYPES))
@@ -99,8 +99,9 @@ function drawInfantry(g, pal, type, frame) {
   const thin = type === "sniper";
   const pyro = type === "pyro";
 
-  // --- legs (walk cycle: stride along the east/west axis) ---
-  const s = frame ? 1 : -1;
+  // --- legs (4-frame walk cycle: full stride, passing, opposite stride,
+  // passing — the "pass" frames pull the legs under the body) ---
+  const s = [1, 0.4, -1, -0.4][frame ?? 0];
   px(g, -1 + s * 2, -5, 2, 3, pal.metalLo);   // north leg
   px(g, -1 - s * 2, 3, 2, 3, pal.metalLo);    // south leg
   px(g, s * 2, -5, 2, 1, pal.metal);          // boot highlights

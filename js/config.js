@@ -41,6 +41,20 @@ const CFG = {
   // Tanks crush enemy infantry they roll over
   CRUSH_DMG: 999,
 
+  // ---- combat physics ----
+  // Ballistic shots (cannon/rocket) fly to a POINT, not a unit: fast targets
+  // can dodge slow shells, and splash hits whatever is there on arrival.
+  PROJ_SPEED: { bullet: 320, flame: 320, snipe: 700, cannon: 250, rocket: 190 },
+  BALLISTIC_SCATTER: 0.05,   // aim error as a fraction of shot distance
+  SPLASH_FF: 0.5,            // explosions deal this fraction to FRIENDLY units
+
+  // Sniper crew kills are deterministic: every Nth sniper hit on a crewed
+  // vehicle kills the driver outright (so play can be planned around it).
+  SNIPE_CREW_EVERY: 3,
+
+  // Mobile units softly push each other apart so armies don't stack
+  SEPARATION_PUSH: 26,       // px/s applied to resolve overlap
+
   // Population cap per team. Continuous (free, time-based) production pauses
   // at the cap so unit counts stay bounded — this keeps the per-frame work
   // (O(n^2) target scans / crewing / crushing) from exploding in long games.
@@ -141,7 +155,7 @@ const STRONG_VS = {
 const INFANTRY_TYPES = {
   grunt:   { name: "Grunt",   baseTime: 8,  hp: 32, speed: 46, range: 70,  dmg: 6,  cooldown: 0.45, radius: 5, aggro: 120, cls: "soft", dtype: "bullet" },
   psycho:  { name: "Psycho",  baseTime: 14, hp: 60, speed: 60, range: 38,  dmg: 14, cooldown: 0.28, radius: 6, aggro: 170, cls: "soft", dtype: "bullet" },
-  sniper:  { name: "Sniper",  baseTime: 18, hp: 24, speed: 40, range: 160, dmg: 12, cooldown: 1.4,  radius: 5, aggro: 200, cls: "soft", dtype: "snipe", snipeChance: 0.4 },
+  sniper:  { name: "Sniper",  baseTime: 18, hp: 24, speed: 40, range: 160, dmg: 12, cooldown: 1.4,  radius: 5, aggro: 200, cls: "soft", dtype: "snipe" },
   pyro:    { name: "Pyro",    baseTime: 16, hp: 44, speed: 48, range: 52,  dmg: 20, cooldown: 0.5,  radius: 6, aggro: 130, cls: "soft", dtype: "flame" },
   bazooka: { name: "Bazooka", baseTime: 17, hp: 26, speed: 38, range: 135, dmg: 28, cooldown: 1.5,  radius: 5, aggro: 190, cls: "soft", dtype: "rocket" },
 };
@@ -151,7 +165,7 @@ const VEHICLE_TYPES = {
   jeep:   { name: "Jeep",       baseTime: 20, armour: 70,  speed: 82, range: 95,  dmg: 9,  cooldown: 0.35, radius: 9,  aggro: 150, cls: "light", dtype: "bullet" },
   light:  { name: "Light Tank", baseTime: 35, armour: 150, speed: 56, range: 115, dmg: 18, cooldown: 0.9,  radius: 12, aggro: 175, cls: "heavy", dtype: "cannon" },
   medium: { name: "Med Tank",   baseTime: 60, armour: 240, speed: 44, range: 135, dmg: 30, cooldown: 1.2,  radius: 14, aggro: 195, cls: "heavy", dtype: "cannon" },
-  apc:    { name: "APC",        baseTime: 30, armour: 180, speed: 64, range: 80,  dmg: 7,  cooldown: 0.4,  radius: 13, aggro: 150, cls: "light", dtype: "bullet" },
+  apc:    { name: "APC",        baseTime: 30, armour: 180, speed: 64, range: 80,  dmg: 7,  cooldown: 0.4,  radius: 13, aggro: 150, cls: "light", dtype: "bullet", transport: 4 },
   rocket: { name: "Rocket Rig", baseTime: 45, armour: 55,  speed: 50, range: 185, dmg: 38, cooldown: 1.7,  radius: 11, aggro: 205, cls: "light", dtype: "rocket", minRange: 60 },
 };
 
@@ -176,7 +190,7 @@ const UNIT_NOTES = {
   jeep:   "Fast harasser vs infantry. Paper armour.",
   light:  "Cannon. Beats light vehicles; poor vs infantry.",
   medium: "Heavy cannon. Costly; crew can be sniped.",
-  apc:    "Tough screen, weak gun. Shields rockets.",
+  apc:    "Carries 4 infantry (U unloads). Tough screen.",
   rocket: "Rocket arty. Long-range glass cannon — screen it!",
   pillbox:"Immobile cannon nest. Pure defence.",
 };

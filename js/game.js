@@ -13,6 +13,11 @@ const G = {
   projectiles: [],
   fx: [],
   scorch: [],                // ground burn decals left by explosions
+  tracks: [],                // vehicle tread marks on soft ground
+  corpses: [],               // fallen infantry, fading away
+  pings: [],                 // minimap attack alerts
+  paused: false,
+  speedMult: 1,              // game speed (0.5 / 1 / 2)
   walls: new Map(),         // key -> hp  (destructible sandbags)
   terrain: null,            // Uint8Array of TERR.* values
   decor: [],                // non-blocking scenery (cacti, etc.)
@@ -54,6 +59,45 @@ const G = {
     const hp = (this.walls.get(k) || 0) - dmg;
     if (hp <= 0) { this.walls.delete(k); this.terrain[k] = TERR.SAND; this.fx.push(new Explosion(Util.cx(tx), Util.cy(ty), 10)); }
     else this.walls.set(k, hp);
+  },
+
+  // line-of-sight: a supercover tile walk between two points; cliffs and
+  // standing sandbag walls block direct fire (rockets arc over them)
+  hasLOS(x1, y1, x2, y2) {
+    let tx = Util.tx(x1), ty = Util.ty(y1);
+    const ex = Util.tx(x2), ey = Util.ty(y2);
+    const dx = Math.abs(ex - tx), dy = Math.abs(ey - ty);
+    const sx = tx < ex ? 1 : -1, sy = ty < ey ? 1 : -1;
+    let err = dx - dy;
+    while (tx !== ex || ty !== ey) {
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; tx += sx; }
+      else { err += dx; ty += sy; }
+      if (tx === ex && ty === ey) break;           // don't test the target's own tile
+      const t = this.terrain[this.tkey(tx, ty)];
+      if (t === TERR.CLIFF) return false;
+      if (t === TERR.WALL && this.walls.get(this.tkey(tx, ty)) > 0) return false;
+    }
+    return true;
+  },
+
+  // decal helpers (capped so long games don't accumulate forever)
+  addTrack(x, y, ang, spread) {
+    this.tracks.push({ x, y, ang, spread, t: 0, life: 7 });
+    if (this.tracks.length > 420) this.tracks.splice(0, this.tracks.length - 420);
+  },
+  addCorpse(u) {
+    this.corpses.push({ x: u.x, y: u.y, typeKey: u.typeKey, team: u.team,
+                        dir: ((Math.round(u.facing / (Math.PI / 4)) % 8) + 8) % 8, t: 0, life: 16 });
+    if (this.corpses.length > 90) this.corpses.splice(0, this.corpses.length - 90);
+  },
+  // minimap attack alert (throttled so a firefight is one ping, not fifty)
+  ping(x, y, force) {
+    const now = this.time;
+    for (const p of this.pings) {
+      if (!force && now - p.born < 2.5 && Util.dist2(x, y, p.x, p.y) < 200 * 200) return;
+    }
+    this.pings.push({ x, y, born: now });
   },
 
   // a unit sitting near a friendly fort or factory slowly repairs
@@ -156,13 +200,24 @@ const G = {
     return best;
   },
 
-  // explosive area damage around an impact (skips the direct-hit target)
-  splashDamage(x, y, r, dmg, attacker, except) {
+  // ballistic impact: full damage at the centre falling off to 40% at the rim.
+  // FRIENDLY units in the blast take CFG.SPLASH_FF of it — clumping is risky.
+  splashAt(x, y, r, dmg, attacker) {
     const r2 = r * r;
     for (const u of this.units) {
-      if (!u.alive || u === except || !u.crewed) continue;
-      if (u.team === attacker.team || u.team === TEAM.NEUTRAL) continue;
-      if (Util.dist2(x, y, u.x, u.y) <= r2) u.applyDamage(dmg, attacker, false);
+      if (!u.alive || u === attacker) continue;
+      if (u.kind === "machine" && !u.driver) continue;        // empty hulls are loot, not targets
+      const d2 = Util.dist2(x, y, u.x, u.y);
+      const rr = r + u.radius;
+      if (d2 > rr * rr) continue;
+      const fall = 1 - 0.6 * Math.sqrt(d2) / rr;
+      const ff = (attacker && u.team === attacker.team) ? CFG.SPLASH_FF : 1;
+      u.applyDamage(dmg * fall * ff, attacker, false);
+    }
+    // blasts also chew nearby structures
+    for (const f of this.factories) {
+      if (f.alive && Util.dist2(x, y, f.x, f.y) <= (r + 16) * (r + 16) && f.team !== (attacker && attacker.team))
+        f.applyDamage(dmg * 0.4);
     }
   },
 
@@ -215,6 +270,8 @@ const G = {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
     this.ctx.imageSmoothingEnabled = false;
+    this._fitCanvas();
+    window.addEventListener("resize", () => this._fitCanvas());
 
     UI.init();
     Input.init(canvas);
@@ -232,21 +289,35 @@ const G = {
       "ZONE WARS",
       "A retro real-time-tactics battle in the spirit of Z. You are BLUE.\n\n" +
       "CONTROLS\n" +
-      "• Left-click or drag a box to select your units (Shift adds more)\n" +
-      "• Right-click the ground to MOVE (your units go through, only firing point-blank)\n" +
-      "• Right-click an enemy to ATTACK it; right-click an enemy/neutral flag to CAPTURE that sector\n" +
-      "• Press A then click to ATTACK-MOVE (advance and engage everything on the way)\n" +
-      "• The map is larger than the screen — scroll with the arrow keys, the screen edges, or by clicking the minimap\n" +
-      "• H = hold position, S = stop, Esc = deselect\n" +
+      "• Left-click or drag a box to select (Shift adds, double-click picks all of a type)\n" +
+      "• Right-click: MOVE / ATTACK an enemy / CAPTURE a flag — Shift queues orders\n" +
+      "• A then click = ATTACK-MOVE. Right-click a friendly APC to load infantry, U unloads\n" +
+      "• Ctrl+1–9 saves a control group, 1–9 recalls it (double-tap jumps the camera)\n" +
+      "• Scroll with arrows, screen edges or the minimap; right-click the minimap to order\n" +
+      "• H hold · S stop · Esc deselect · P pause · +/− game speed · M mute\n" +
       "• Click your factory to choose what it builds; right-click to set its rally point\n\n" +
-      "The cursor tells you which order a right-click will give. Hold sectors to build faster, " +
-      "crew abandoned vehicles, and win by elimination, destroying the enemy fort, or sneaking a unit inside it.",
+      "Hold sectors to build faster. Tank shells and rockets now fly to a POINT — dodge them, " +
+      "and don't clump: blasts hurt your own troops too. Snipers drop vehicle crews with every 3rd hit. " +
+      "Win by elimination, destroying the enemy fort, or sneaking a unit inside it.",
       "START BATTLE",
-      () => this.start()
+      () => { Sound.init(); this.start(); }
     );
 
     // render one static frame behind the overlay
     this._render();
+  },
+
+  // scale the fixed-resolution canvas up to fill the stage (aspect preserved,
+  // snapped to integer multiples when possible so pixels stay square)
+  _fitCanvas() {
+    const stage = this.canvas.parentElement;
+    if (!stage) return;
+    const sw = stage.clientWidth - 8, sh = stage.clientHeight - 8;
+    if (sw <= 0 || sh <= 0) return;
+    let s = Math.min(sw / CFG.VIEW_W, sh / CFG.VIEW_H);
+    if (s >= 1) s = Math.max(1, Math.floor(s * 2) / 2);    // whole/half steps only
+    this.canvas.style.width = Math.round(CFG.VIEW_W * s) + "px";
+    this.canvas.style.height = Math.round(CFG.VIEW_H * s) + "px";
   },
 
   start() {
@@ -506,8 +577,13 @@ const G = {
     let dt = (now - this.last) / 1000;
     this.last = now;
     if (dt > 0.05) dt = 0.05;       // clamp big stalls
-    this.dt = dt;
-    this._update(dt);
+    if (this.paused) {
+      this._updateCamera(dt);       // the camera still pans while paused
+      this.dt = 0;
+    } else {
+      this.dt = dt * this.speedMult;
+      this._update(this.dt, dt);
+    }
     this._render();
     requestAnimationFrame(this._frameBound);
   },
@@ -524,11 +600,11 @@ const G = {
     if (dx || dy) { this.cam.x += dx * sp; this.cam.y += dy * sp; this.clampCam(); }
   },
 
-  _update(dt) {
+  _update(dt, rawDt) {
     if (this.over) return;
     this.dt = dt;
     this.time += dt;
-    this._updateCamera(dt);
+    this._updateCamera(rawDt ?? dt);   // camera speed is independent of game speed
 
     // per-frame population count (used for the production cap — O(1) lookups)
     this._pop = { blue: 0, red: 0 };
@@ -542,12 +618,15 @@ const G = {
 
     for (const u of this.units) UnitAI.think(u);
     for (const u of this.units) u.update(dt);
+    this._separate(dt);
     for (const f of this.factories) f.update(dt);
     for (const f of this.forts) f.update(dt);
 
     for (const p of this.projectiles) p.update(dt);
     for (const e of this.fx) e.update(dt);
     for (const s of this.scorch) s.t += dt;
+    for (const s of this.tracks) s.t += dt;
+    for (const c of this.corpses) c.t += dt;
 
     Sectors.checkCaptures();
     this._handleCrewing();
@@ -571,8 +650,37 @@ const G = {
           if (inf.commandAttack) m.orderAttack(inf.commandAttack);
           else if (inf.moveGoalX != null) m.orderMove(inf.moveGoalX, inf.moveGoalY);
           inf.alive = false;      // soldier is now inside the vehicle
+          Sound.playAt("crew", m.x, m.y);
           break;
         }
+      }
+    }
+  },
+
+  // soft collision: overlapping mobile units push each other apart so armies
+  // spread out instead of stacking on one tile. Vehicles still drive INTO
+  // enemy infantry (that's how crushing works), so those pairs are skipped.
+  _separate(dt) {
+    const us = this.units, n = us.length;
+    const push = CFG.SEPARATION_PUSH * dt;
+    for (let i = 0; i < n; i++) {
+      const a = us[i];
+      if (!a.alive || (a.kind === "machine" && (a.immobile || !a.driver))) continue;
+      for (let j = i + 1; j < n; j++) {
+        const b = us[j];
+        if (!b.alive || (b.kind === "machine" && (b.immobile || !b.driver))) continue;
+        // let crushers reach their victims
+        if (a.team !== b.team &&
+            ((a.isVehicle() && b.kind === "infantry") || (b.isVehicle() && a.kind === "infantry"))) continue;
+        const minD = a.radius + b.radius - 2;
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 >= minD * minD || d2 === 0) continue;
+        const d = Math.sqrt(d2);
+        const f = Math.min(push, (minD - d) * 0.5) / (d || 1);
+        const ox = dx * f, oy = dy * f;
+        if (this.tilePassable(Util.tx(a.x - ox), Util.ty(a.y - oy))) { a.x -= ox; a.y -= oy; }
+        if (this.tilePassable(Util.tx(b.x + ox), Util.ty(b.y + oy))) { b.x += ox; b.y += oy; }
       }
     }
   },
@@ -584,6 +692,9 @@ const G = {
     this.factories = this.factories.filter(f => f.alive);
     this.scorch = this.scorch.filter(s => s.t < s.life);
     if (this.scorch.length > 50) this.scorch.splice(0, this.scorch.length - 50);
+    this.tracks = this.tracks.filter(s => s.t < s.life);
+    this.corpses = this.corpses.filter(c => c.t < c.life);
+    this.pings = this.pings.filter(p => this.time - p.born < 3);
   },
 
   _checkWin() {
@@ -839,7 +950,9 @@ const G = {
       }
     }
 
+    this._drawTracks(ctx);
     this._drawScorch(ctx);
+    this._drawCorpses(ctx);
     this._drawFlags(ctx);
     this._drawFactories(ctx);
     this._drawForts(ctx);
@@ -851,10 +964,51 @@ const G = {
     // ---- screen-space HUD (not affected by the camera) ----
     Input.popupRects.length = 0;
     this._drawSelectionBox(ctx);
+    this._drawSelectionPanel(ctx); // bottom-left: what's selected
     this._drawFactoryPopup(ctx); // unit-select popup above the selected factory
     this._drawFortPopup(ctx);    // HQ command popup (train / instant / upgrades)
     this._drawMinimap(ctx);
+    this._drawSpeedState(ctx);   // PAUSED / fast-forward banner
     this._drawCursor(ctx);       // context-sensitive cursor, drawn last
+  },
+
+  // fading tread marks: two short bars perpendicular to the hull direction
+  _drawTracks(ctx) {
+    for (const s of this.tracks) {
+      if (!this._inView(s.x, s.y)) continue;
+      const a = 0.16 * (1 - s.t / s.life);
+      const px = -Math.sin(s.ang) * s.spread, py = Math.cos(s.ang) * s.spread;
+      ctx.fillStyle = `rgba(60,44,24,${a})`;
+      ctx.fillRect(Math.round(s.x + px) - 1, Math.round(s.y + py) - 1, 3, 3);
+      ctx.fillRect(Math.round(s.x - px) - 1, Math.round(s.y - py) - 1, 3, 3);
+    }
+  },
+
+  // fallen infantry stay on the field and slowly fade
+  _drawCorpses(ctx) {
+    for (const c of this.corpses) {
+      if (!this._inView(c.x, c.y)) continue;
+      const p = c.t / c.life;
+      const a = p < 0.7 ? 1 : 1 - (p - 0.7) / 0.3;
+      PX.fillOval(ctx, c.x, c.y + 2, 6, 3.5, `rgba(102,16,16,${0.45 * a})`, 2);  // blood pool
+      const palTeam = c.team === TEAM.BLUE ? "blue" : "red";
+      const img = Sprites.infantry(c.typeKey, palTeam, (c.dir + 2) % 8, 0);  // sideways = fallen
+      ctx.globalAlpha = 0.75 * a;
+      this._blit(ctx, img, c.x, c.y, CFG.UNIT_SCALE);
+      ctx.globalAlpha = 1;
+    }
+  },
+
+  // top-centre banner for pause / game speed
+  _drawSpeedState(ctx) {
+    if (!this.paused && this.speedMult === 1) return;
+    const label = this.paused ? "PAUSED — P to resume" : `SPEED ×${this.speedMult}`;
+    ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    const w = label.length * 7 + 18;
+    ctx.fillStyle = "rgba(8,10,12,0.85)"; ctx.fillRect(CFG.VIEW_W / 2 - w / 2, 8, w, 20);
+    ctx.fillStyle = this.paused ? "#ffe24a" : "#9cff6a";
+    ctx.fillText(label, CFG.VIEW_W / 2, 18);
+    ctx.textAlign = "left";
   },
 
   _cmdColor(kind) {
@@ -892,6 +1046,7 @@ const G = {
     const m = Input.mouse, kind = Input.attackMoveArmed ? "amove" : Input.hover.kind;
     const col = kind === "attack" ? "#ff5b5b" : kind === "capture" ? "#ffe24a"
               : kind === "amove" ? "#ffb24a" : kind === "rally" ? "#4da6ff"
+              : kind === "board" ? "#8fd0ff"
               : kind === "select" ? "#9cff6a" : kind === "none" ? "#cccccc" : "#9cff6a";
     // crosshair
     ctx.fillStyle = col;
@@ -901,7 +1056,7 @@ const G = {
     else if (kind === "capture") { ctx.fillRect(m.x + 2, m.y - 9, 7, 2); ctx.fillRect(m.x + 2, m.y - 7, 5, 2); ctx.fillRect(m.x + 1, m.y - 9, 2, 7); }
     else if (kind === "select") PX.brackets(ctx, m.x, m.y, 7, col, 4, 2);
     // label
-    const label = { attack: "ATTACK", capture: "CAPTURE", move: "MOVE", amove: "ATK-MOVE", rally: "RALLY", select: "SELECT", none: "" }[kind];
+    const label = { attack: "ATTACK", capture: "CAPTURE", move: "MOVE", amove: "ATK-MOVE", rally: "RALLY", select: "SELECT", board: "BOARD", none: "" }[kind];
     if (label) {
       ctx.font = "8px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "top";
       ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(m.x + 9, m.y + 8, label.length * 5 + 4, 11);
@@ -1080,16 +1235,26 @@ const G = {
       const S = CFG.UNIT_SCALE;
       if (u.kind === "machine") {
         const aim = this._dirOf(u.target ? u.facing : u.hullFacing);
+        // visual recoil: the turret kicks back along the aim direction
+        const kick = u.recoil > 0 ? u.recoil / 0.12 * 2.5 : 0;
+        const rx = -Math.cos(u.facing) * kick, ry = -Math.sin(u.facing) * kick;
         if (u.immobile) {
           this._blit(ctx, Sprites.gunBase(palTeam), u.x, u.y, S);
-          this._blit(ctx, Sprites.gunTurret(palTeam, aim), u.x, u.y, S);
+          this._blit(ctx, Sprites.gunTurret(palTeam, aim), u.x + rx, u.y + ry, S);
         } else {
           this._blit(ctx, Sprites.hull(u.typeKey, palTeam, this._dirOf(u.hullFacing)), u.x, u.y, S);
-          this._blit(ctx, Sprites.turret(u.typeKey, palTeam, aim), u.x, u.y, S);
+          this._blit(ctx, Sprites.turret(u.typeKey, palTeam, aim), u.x + rx, u.y + ry, S);
         }
         if (u.driver) this._bar(ctx, u.x, u.y - u.radius - 6, u.radius * 2 + 4, u.armour / u.maxArmour, "#e8c050");
+        // transports show one pip per passenger
+        if (u.cargo && u.cargo.length) {
+          for (let i = 0; i < u.cargo.length; i++) {
+            ctx.fillStyle = "#fff"; ctx.fillRect(u.x - u.radius + 1 + i * 5, u.y + u.radius + 3, 3, 3);
+            ctx.fillStyle = this._teamColor(u.team); ctx.fillRect(u.x - u.radius + 2 + i * 5, u.y + u.radius + 4, 1, 1);
+          }
+        }
       } else {
-        const frame = u.moving ? (Math.floor(u.animClock) & 1) : 0;
+        const frame = u.moving ? (Math.floor(u.animClock) % 4) : 0;
         this._blit(ctx, Sprites.infantry(u.typeKey, palTeam, this._dirOf(u.facing), frame), u.x, u.y, S);
         this._bar(ctx, u.x, u.y - u.radius - 5, u.radius * 2 + 2, u.hp / u.maxHp, "#7d7");
       }
@@ -1288,6 +1453,13 @@ const G = {
       ctx.fillStyle = this._teamColor(u.team);
       ctx.fillRect(ox + u.x * sx - 0.5, oy + u.y * sy - 0.5, u.kind === "machine" ? 2 : 1.4, u.kind === "machine" ? 2 : 1.4);
     }
+    // attack pings: expanding rings where the player is taking hits
+    for (const p of this.pings) {
+      const age = (this.time - p.born) / 3;
+      const r = 3 + age * 9;
+      ctx.strokeStyle = `rgba(255,80,80,${0.9 * (1 - age)})`; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(ox + p.x * sx, oy + p.y * sy, r, 0, Math.PI * 2); ctx.stroke();
+    }
     // camera viewport rectangle
     ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 1;
     ctx.strokeRect(ox + this.cam.x * sx, oy + this.cam.y * sy, CFG.VIEW_W * sx, CFG.VIEW_H * sy);
@@ -1317,6 +1489,20 @@ const G = {
       if (!this._inView(p.x, p.y)) continue;
       if (p.sniper) {
         PX.line(ctx, p.x, p.y, p.x - (p.tx - p.x) * 0.05, p.y - (p.ty - p.y) * 0.05, "#fff", 2, 2);
+      } else if (p.ballistic && p.arc) {
+        // arcing rocket: ground shadow + the round drawn at its arc height
+        const h = p.arcHeight();
+        PX.fillOval(ctx, p.x, p.y, 3, 2, "rgba(0,0,0,0.25)", 2);
+        ctx.fillStyle = "#2a2a2a";
+        ctx.fillRect(Math.floor(p.x / 2) * 2 - 1, Math.floor((p.y - h) / 2) * 2 - 1, 4, 4);
+        ctx.fillStyle = "#ffd24a";
+        ctx.fillRect(Math.floor(p.x / 2) * 2, Math.floor((p.y - h) / 2) * 2, 2, 2);
+      } else if (p.ballistic) {
+        // cannon shell: a dark slug with a hot tail
+        ctx.fillStyle = "#1c1c1c";
+        ctx.fillRect(Math.floor(p.x / 2) * 2 - 1, Math.floor(p.y / 2) * 2 - 1, 4, 4);
+        ctx.fillStyle = "#ffcf5b";
+        ctx.fillRect(Math.floor(p.x / 2) * 2, Math.floor(p.y / 2) * 2, 2, 2);
       } else {
         ctx.fillStyle = p.team === TEAM.BLUE ? "#bfe0ff" : p.team === TEAM.RED ? "#ffd0d0" : "#ffe";
         ctx.fillRect(Math.floor(p.x / 2) * 2, Math.floor(p.y / 2) * 2, 2, 2);
@@ -1396,6 +1582,19 @@ const G = {
         PX.ring(ctx, e.x, e.y, 4 + p * 9, col, 2, 2, 1);   // expanding ring
         this._cmdIcon(ctx, e.kind, e.x, e.y, col);
         ctx.globalAlpha = 1;
+      } else if (e instanceof SmokePuff) {
+        const p = e.t / e.life, a = (1 - p);
+        const r = (2 + p * 5) * e.scale;
+        const col = e.dark ? `rgba(30,28,26,${0.5 * a})` : `rgba(120,112,104,${0.4 * a})`;
+        PX.fillCircle(ctx, e.x, e.y, r, col, 2);
+        if (e.dark && p < 0.25) PX.fillCircle(ctx, e.x, e.y + 2, 2, `rgba(255,140,40,${0.7 * (1 - p * 4)})`, 2);
+      } else if (e instanceof FloatText) {
+        const a = 1 - e.t / e.life;
+        ctx.font = "bold 9px monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.globalAlpha = a;
+        ctx.fillStyle = "#000"; ctx.fillText(e.text, e.x + 1, e.y + 1);
+        ctx.fillStyle = e.color; ctx.fillText(e.text, e.x, e.y);
+        ctx.globalAlpha = 1; ctx.textAlign = "left";
       }
     }
   },
@@ -1408,6 +1607,48 @@ const G = {
     ctx.strokeStyle = "#9cff6a"; ctx.lineWidth = 1;
     ctx.strokeRect(x + 0.5, y + 0.5, w, h);
     ctx.fillStyle = "rgba(156,255,106,0.08)"; ctx.fillRect(x, y, w, h);
+  },
+
+  // bottom-left summary of the current selection: one cell per unit type with
+  // a sprite, count, best rank, and (for transports) a cargo readout
+  _drawSelectionPanel(ctx) {
+    const sel = this.units.filter(u => u.selected && u.alive);
+    if (!sel.length) return;
+    // group by type
+    const byType = new Map();
+    for (const u of sel) {
+      let g = byType.get(u.typeKey);
+      if (!g) { g = { key: u.typeKey, n: 0, rank: 0, kills: 0, hp: 0, max: 0 }; byType.set(u.typeKey, g); }
+      g.n++; g.rank = Math.max(g.rank, u.rank); g.kills += u.kills;
+      g.hp += u.kind === "infantry" ? u.hp : u.armour;
+      g.max += u.kind === "infantry" ? u.maxHp : u.maxArmour;
+    }
+    const groups = [...byType.values()];
+    const cell = 42, W = Math.max(150, groups.length * cell + 8), H = 64;
+    const ox = 8, oy = CFG.VIEW_H - H - 8;
+    this._popupPanel(ctx, ox, oy, W, H);
+    ctx.font = "8px monospace"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "#6c7a72";
+    ctx.fillText(`${sel.length} SELECTED`, ox + 6, oy + 8);
+    groups.forEach((g, i) => {
+      const gx = ox + 4 + i * cell, gy = oy + 14;
+      ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fillRect(gx, gy, cell - 2, 34);
+      this._unitIcon(ctx, g.key, gx + 14, gy + 15, 24);
+      ctx.fillStyle = "#cfd6dc"; ctx.textAlign = "right";
+      ctx.fillText("×" + g.n, gx + cell - 5, gy + 8); ctx.textAlign = "left";
+      // health fraction + chevrons of the best rank in the group
+      this._bar(ctx, gx + (cell - 2) / 2, gy + 28, cell - 10, g.hp / (g.max || 1), "#7d7");
+      if (g.rank > 0) {
+        ctx.fillStyle = g.rank >= 3 ? "#ffe24a" : "#e8e8e8";
+        for (let r = 0; r < g.rank; r++) ctx.fillRect(gx + 28 + r * 3, gy + 3, 2, 2);
+      }
+    });
+    // single APC: show cargo + the unload hint
+    const apc = sel.length === 1 && sel[0].cargo ? sel[0] : null;
+    if (apc) {
+      ctx.fillStyle = "#8fd0ff";
+      ctx.fillText(`CARGO ${apc.cargo.length}/${apc.stats.transport}` + (apc.cargo.length ? " — U unloads" : " — right-click with infantry"), ox + 6, oy + H - 7);
+    }
   },
 };
 
