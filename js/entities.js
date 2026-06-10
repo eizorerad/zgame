@@ -211,10 +211,15 @@ class Unit {
     const tgt = this.target;
     const pursue = this.chase || (this.commandAttack && this.commandAttack.alive);
 
+    // Weapons with a minimum range (rocket artillery) cannot fire point-blank
+    // — get inside that ring and they are helpless. That's their weakness.
+    const minR = this.stats.minRange || 0;
+
     // Hold position: stand still, fire only at what enters weapon range.
     if (this.holdPosition) {
-      if (tgt && tgt.alive && Util.dist(this.x, this.y, tgt.x, tgt.y) <= this.range) {
-        this.faceTo(tgt.x, tgt.y); this._fire(tgt);
+      if (tgt && tgt.alive) {
+        const d = Util.dist(this.x, this.y, tgt.x, tgt.y);
+        if (d <= this.range && d >= minR) { this.faceTo(tgt.x, tgt.y); this._fire(tgt); }
       }
       return;
     }
@@ -222,7 +227,11 @@ class Unit {
     // Pursue mode (attack / attack-move): chase the target, fire when in range.
     if (pursue && tgt && tgt.alive) {
       const d = Util.dist(this.x, this.y, tgt.x, tgt.y);
-      if (d <= this.range) { this.faceTo(tgt.x, tgt.y); this._fire(tgt); return; }
+      if (d <= this.range) {
+        this.faceTo(tgt.x, tgt.y);
+        if (d >= minR) this._fire(tgt);     // too close -> can't engage
+        return;
+      }
       if (this.goalTx !== Util.tx(tgt.x) || this.goalTy !== Util.ty(tgt.y)) this._setGoal(tgt.x, tgt.y);
       this._followPath(dt);
       return;
@@ -230,8 +239,9 @@ class Unit {
 
     // Go-through move (or idle): keep heading to the goal, only firing at a
     // target that is already in weapon range — never chase off-course.
-    if (tgt && tgt.alive && Util.dist(this.x, this.y, tgt.x, tgt.y) <= this.range) {
-      this.faceTo(tgt.x, tgt.y); this._fire(tgt);
+    if (tgt && tgt.alive) {
+      const d = Util.dist(this.x, this.y, tgt.x, tgt.y);
+      if (d <= this.range && d >= minR) { this.faceTo(tgt.x, tgt.y); this._fire(tgt); }
     }
     this._followPath(dt);
     this._maybeRepair(dt);
@@ -542,6 +552,12 @@ class Projectile {
     if (t && t.alive) {
       t.applyDamage(this.dmg, this.attacker, this.sniper);
       G.fx.push(new Spark(t.x, t.y, this.sniper ? "#fff" : "#ffcf5b"));
+      // explosive impacts splash reduced damage around the hit point
+      const sp = this.attacker && SPLASH[this.attacker.dtype];
+      if (sp) {
+        G.splashDamage(t.x, t.y, sp.r, this.dmg * sp.f, this.attacker, t);
+        if (this.attacker.dtype === "rocket") G.fx.push(new Explosion(t.x, t.y, 8));
+      }
     }
   }
 }

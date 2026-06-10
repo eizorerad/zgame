@@ -131,6 +131,10 @@ function drawInfantry(g, pal, type, frame) {
   px(g, 0, -2, 3, 1, "#ffffff");
   px(g, 2, -1, 1, 2, pal.trim);
 
+  // --- role accent: a squad patch so unit types read at a glance ---
+  const accent = { grunt: "#ffffff", psycho: "#ffd24a", sniper: "#9ce6ff", pyro: "#ff8a4a", bazooka: "#caffa0" }[type];
+  if (accent) px(g, -3, 1, 2, 2, accent);
+
   // --- weapon ---
   px(g, 0, -1, 3, 2, pal.metal);              // arms
   if (type === "sniper") {
@@ -306,9 +310,24 @@ const FACE = "#34373c", FACEH = "#3e4147", FACES = "#2a2c30";
 const GLASS = "#6fb0c8", GLASSH = "#9fd6ec";
 
 function drawBuilding(g, pal, ft) {
+  // worn concrete apron grounds the building in the world
+  const pad = { robot: [44, -8, 28], vehicle: [54, -6, 24], gun: [48, -4, 22] }[ft];
+  drawApron(g, pad[0], pad[1], pad[2]);
   if (ft === "robot") drawRobotFactory(g, pal);
   else if (ft === "vehicle") drawVehicleFactory(g, pal);
   else drawGunFactory(g, pal);
+}
+
+function drawApron(g, w, y0, h) {
+  const x0 = -Math.floor(w / 2);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const edge = Math.min(x, w - 1 - x, y, h - 1 - y);
+    if (edge < 2 && Util.hash(x * 7 + 31, y * 13 + edge) < 0.45) continue;  // ragged border
+    g.fillStyle = ((x + y) & 1) ? "#99937f" : "#8b8574";
+    g.fillRect(x0 + x, y0 + y, 1, 1);
+  }
+  g.fillStyle = "#6f6a5c";                                                  // expansion seams
+  for (let x = x0 + 8; x < x0 + w - 4; x += 14) g.fillRect(x, y0 + 2, 1, h - 4);
 }
 
 /* Buildings: 3/4 view with a tall structure, heavy metallic shading,

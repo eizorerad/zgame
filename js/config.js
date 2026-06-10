@@ -125,6 +125,18 @@ const DMG_MULT = {
   rocket: { soft: 0.8, light: 1.5,  heavy: 1.7  },   // rockets: anti-armour
 };
 
+// area damage on impact: explosive shots hurt everything near the hit
+const SPLASH = {
+  cannon: { r: 16, f: 0.5 },     // shells clip clumped infantry
+  rocket: { r: 22, f: 0.55 },    // rockets blast a wider area
+};
+
+// popup hint: what each damage type is best against
+const STRONG_VS = {
+  bullet: "infantry", flame: "infantry", snipe: "infantry & crews",
+  cannon: "vehicles", rocket: "tanks & armour",
+};
+
 /* ---- Infantry types ----------------------------------------------------- */
 const INFANTRY_TYPES = {
   grunt:   { name: "Grunt",   baseTime: 8,  hp: 32, speed: 46, range: 70,  dmg: 6,  cooldown: 0.45, radius: 5, aggro: 120, cls: "soft", dtype: "bullet" },
@@ -140,7 +152,7 @@ const VEHICLE_TYPES = {
   light:  { name: "Light Tank", baseTime: 35, armour: 150, speed: 56, range: 115, dmg: 18, cooldown: 0.9,  radius: 12, aggro: 175, cls: "heavy", dtype: "cannon" },
   medium: { name: "Med Tank",   baseTime: 60, armour: 240, speed: 44, range: 135, dmg: 30, cooldown: 1.2,  radius: 14, aggro: 195, cls: "heavy", dtype: "cannon" },
   apc:    { name: "APC",        baseTime: 30, armour: 180, speed: 64, range: 80,  dmg: 7,  cooldown: 0.4,  radius: 13, aggro: 150, cls: "light", dtype: "bullet" },
-  rocket: { name: "Rocket Rig", baseTime: 45, armour: 55,  speed: 50, range: 185, dmg: 38, cooldown: 1.7,  radius: 11, aggro: 205, cls: "light", dtype: "rocket" },
+  rocket: { name: "Rocket Rig", baseTime: 45, armour: 55,  speed: 50, range: 185, dmg: 38, cooldown: 1.7,  radius: 11, aggro: 205, cls: "light", dtype: "rocket", minRange: 60 },
 };
 
 /* ---- Gun emplacements (built by gun factories, immobile) ---------------- */

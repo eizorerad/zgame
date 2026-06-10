@@ -34,9 +34,9 @@ const UnitAI = {
       }
     }
 
-    // acquire: nearest enemy thing inside the scan radius
+    // acquire: best counter-weighted enemy inside the scan radius
     if (!u.target) {
-      const foe = G.nearestEnemyTarget(u.x, u.y, u.team, scanR);
+      const foe = G.nearestEnemyTarget(u.x, u.y, u.team, scanR, u.dtype);
       if (foe) u.target = foe;
     }
 

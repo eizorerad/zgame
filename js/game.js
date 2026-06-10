@@ -135,18 +135,35 @@ const G = {
     return best;
   },
 
-  nearestEnemyTarget(x, y, team, range) {
-    let best = null, bd = range * range;
-    const consider = (e) => {
+  // Pick a target inside `range`, weighted by the counter system: a unit
+  // prefers enemies its damage type is strong against (effective distance =
+  // real distance / multiplier), so bazookas drift to tanks, rifles to men.
+  nearestEnemyTarget(x, y, team, range, dtype) {
+    let best = null, bestScore = Infinity;
+    const r2 = range * range;
+    const consider = (e, cls) => {
       if (!e || !e.alive) return;
       if (e.team === team || e.team === TEAM.NEUTRAL) return;
       const d = Util.dist2(x, y, e.x, e.y);
-      if (d < bd) { bd = d; best = e; }
+      if (d > r2) return;
+      const m = (dtype && DMG_MULT[dtype]) ? (DMG_MULT[dtype][cls] ?? 1) : 1;
+      const score = d / (m * m);
+      if (score < bestScore) { bestScore = score; best = e; }
     };
-    for (const u of this.units) { if (u.crewed) consider(u); }
-    for (const f of this.forts) consider(f);
-    for (const f of this.factories) consider(f);
+    for (const u of this.units) { if (u.crewed) consider(u, u.cls); }
+    for (const f of this.forts) consider(f, "heavy");
+    for (const f of this.factories) consider(f, "heavy");
     return best;
+  },
+
+  // explosive area damage around an impact (skips the direct-hit target)
+  splashDamage(x, y, r, dmg, attacker, except) {
+    const r2 = r * r;
+    for (const u of this.units) {
+      if (!u.alive || u === except || !u.crewed) continue;
+      if (u.team === attacker.team || u.team === TEAM.NEUTRAL) continue;
+      if (Util.dist2(x, y, u.x, u.y) <= r2) u.applyDamage(dmg, attacker, false);
+    }
   },
 
   unitAt(px, py) {
@@ -271,6 +288,26 @@ const G = {
       const tx = Util.randInt(1, CFG.COLS - 2), ty = Util.randInt(1, CFG.ROWS - 2);
       if (this.terrain[this.tkey(tx, ty)] === TERR.SAND && Util.chance(0.6))
         this.decor.push({ tx, ty, x: Util.cx(tx), y: Util.cy(ty), type: "rock" });
+    }
+    // old battle craters and collapsed ruins tell a story on the sand
+    for (let i = 0; i < 16; i++) {
+      const tx = Util.randInt(2, CFG.COLS - 3), ty = Util.randInt(2, CFG.ROWS - 3);
+      if (this.terrain[this.tkey(tx, ty)] === TERR.SAND)
+        this.decor.push({ tx, ty, x: Util.cx(tx), y: Util.cy(ty), type: "crater", r: Util.randInt(4, 8) });
+    }
+    for (let i = 0; i < 9; i++) {
+      const tx = Util.randInt(2, CFG.COLS - 3), ty = Util.randInt(2, CFG.ROWS - 3);
+      if (this.terrain[this.tkey(tx, ty)] === TERR.SAND)
+        this.decor.push({ tx, ty, x: Util.cx(tx), y: Util.cy(ty), type: "ruin" });
+    }
+    // palm trees cluster on the shores of the lakes (oasis look)
+    for (let y = 1; y < CFG.ROWS - 1; y++) for (let x = 1; x < CFG.COLS - 1; x++) {
+      if (this.terrain[this.tkey(x, y)] !== TERR.SAND) continue;
+      let nearWater = false;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]])
+        if (this.terrain[this.tkey(x + dx, y + dy)] === TERR.WATER) nearWater = true;
+      if (nearWater && Util.chance(0.3))
+        this.decor.push({ tx: x, ty: y, x: Util.cx(x), y: Util.cy(y), type: "palm", h: Util.randInt(7, 10) });
     }
 
     // ---- irregular sector partition (organic, ~equal area) -----------
@@ -707,6 +744,36 @@ const G = {
 
   _decor(c, d, K) {
     const X = d.x, Y = d.y;
+    if (d.type === "crater") {                     // old shell crater
+      PX.fillOval(c, X, Y, d.r + 2, (d.r + 2) * 0.7, "#a8854c", 1);   // thrown-out rim
+      PX.fillOval(c, X, Y, d.r, d.r * 0.65, "#6f5630", 1);
+      PX.fillOval(c, X + 1, Y + 1, d.r - 2, (d.r - 2) * 0.6, "#54431f", 1);
+      c.fillStyle = "#d8b97e"; c.fillRect(X - d.r, Y - Math.round(d.r * 0.7), d.r, 1); // sunlit rim
+      return;
+    }
+    if (d.type === "ruin") {                       // collapsed wall stub
+      c.fillStyle = "rgba(0,0,0,0.2)"; c.fillRect(X - 6, Y + 4, 14, 2);
+      c.fillStyle = "#8a8478"; c.fillRect(X - 6, Y - 4, 5, 9);        // standing corner
+      c.fillStyle = "#9a948a"; c.fillRect(X - 6, Y - 4, 5, 2);
+      c.fillStyle = "#6f6a60"; c.fillRect(X - 6, Y + 3, 5, 2);
+      for (let i = 0; i < 7; i++) {                                    // tumbled blocks
+        const hx = Util.hash(d.tx * 5 + i, d.ty), hy = Util.hash(d.tx, d.ty * 5 + i);
+        c.fillStyle = hx > 0.5 ? "#85806f" : "#736e5f";
+        c.fillRect(X - 2 + Math.floor(hx * 10), Y - 2 + Math.floor(hy * 8), 3, 2);
+      }
+      return;
+    }
+    if (d.type === "palm") {                       // oasis palm
+      c.fillStyle = "rgba(0,0,0,0.25)"; c.fillRect(X - 3, Y + 2, 9, 2);
+      c.fillStyle = "#6b4a26";                                         // curved trunk
+      for (let i = 0; i < d.h; i++) c.fillRect(X + Math.round(i * 0.25), Y - i, 2, 1);
+      const tx2 = X + Math.round(d.h * 0.25), ty2 = Y - d.h;
+      for (const [fx, fy] of [[-5, -2], [5, -2], [-4, 2], [4, 2], [0, -4], [-6, 0], [6, 0]]) {
+        PX.line(c, tx2, ty2, tx2 + fx, ty2 + fy, "#3f7a3a", 1, 1);     // fronds
+      }
+      c.fillStyle = "#5aa552"; c.fillRect(tx2 - 1, ty2 - 1, 3, 2);
+      return;
+    }
     if (d.type === "rock") {                       // boulder cluster
       c.fillStyle = "rgba(0,0,0,0.22)"; c.fillRect(X - 3, Y + 2, 10, 3);
       c.fillStyle = "#6b6457"; c.fillRect(X - 3, Y - 2, 8, 6);
@@ -782,8 +849,10 @@ const G = {
     this._drawFx(ctx);           // fire/debris/smoke render on top of units
     ctx.restore();
     // ---- screen-space HUD (not affected by the camera) ----
+    Input.popupRects.length = 0;
     this._drawSelectionBox(ctx);
     this._drawFactoryPopup(ctx); // unit-select popup above the selected factory
+    this._drawFortPopup(ctx);    // HQ command popup (train / instant / upgrades)
     this._drawMinimap(ctx);
     this._drawCursor(ctx);       // context-sensitive cursor, drawn last
   },
@@ -1044,13 +1113,33 @@ const G = {
     else { blit(Sprites.hull(key, team, dir)); blit(Sprites.turret(key, team, dir)); }
   },
 
+  // shared popup chrome: dark panel with a steel border
+  _popupPanel(ctx, px, py, W, H) {
+    ctx.fillStyle = "rgba(10,12,16,0.93)"; ctx.fillRect(px, py, W, H);
+    ctx.fillStyle = "#2b3a44"; ctx.fillRect(px, py, W, 2); ctx.fillRect(px, py + H - 2, W, 2); ctx.fillRect(px, py, 2, H); ctx.fillRect(px + W - 2, py, 2, H);
+  },
+
+  // detail box used by both popups: stats line + counter hint + note
+  _popupDetail(ctx, px, dy0, W, dkey) {
+    const st = INFANTRY_TYPES[dkey] || VEHICLE_TYPES[dkey] || GUN_TYPES[dkey];
+    ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fillRect(px + 4, dy0, W - 8, 40);
+    ctx.font = "8px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#ffd24a";
+    const hp = st.hp !== undefined ? `HP ${st.hp}` : `ARM ${st.armour}`;
+    const mr = st.minRange ? `  MIN ${st.minRange}` : "";
+    ctx.fillText(`${hp}  DMG ${st.dmg}  RNG ${st.range}${mr}  SPD ${st.speed}`, px + 8, dy0 + 10);
+    ctx.fillStyle = "#8fd0ff";
+    ctx.fillText(`${st.cls} armour · strong vs ${STRONG_VS[st.dtype] || "-"}`, px + 8, dy0 + 21);
+    ctx.fillStyle = "#9fb0c0";
+    ctx.fillText(UNIT_NOTES[dkey] || "", px + 8, dy0 + 32);
+  },
+
   // RTS-style popup above the selected factory: pick the unit to build, with
   // its sprite, stats and a short note.
   _drawFactoryPopup(ctx) {
-    Input.popupRects = [];
     const f = Input.selectedFactory;
     if (!f) return;
-    const keys = f.spec.keys, rowH = 20, W = 184, headH = 16, detailH = 30;
+    const keys = f.spec.keys, rowH = 20, W = 184, headH = 16, detailH = 44;
     const H = headH + keys.length * rowH + detailH + 6;
     const fsx = f.x - this.cam.x, fsy = f.y - this.cam.y;
     let px = Util.clamp(Math.round(fsx - W / 2), 4, CFG.VIEW_W - W - 4);
@@ -1058,8 +1147,7 @@ const G = {
     if (py < 4) py = Math.round(fsy + 34);
     py = Util.clamp(py, 4, CFG.VIEW_H - H - 4);
 
-    ctx.fillStyle = "rgba(10,12,16,0.93)"; ctx.fillRect(px, py, W, H);
-    ctx.fillStyle = "#2b3a44"; ctx.fillRect(px, py, W, 2); ctx.fillRect(px, py + H - 2, W, 2); ctx.fillRect(px, py, 2, H); ctx.fillRect(px + W - 2, py, 2, H);
+    this._popupPanel(ctx, px, py, W, H);
     ctx.fillStyle = "#e8d98a"; ctx.font = "bold 10px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
     ctx.fillText(f.ftype.toUpperCase() + " FACTORY", px + 8, py + headH / 2 + 1);
 
@@ -1076,21 +1164,104 @@ const G = {
       ctx.fillStyle = active ? "#cfe3ff" : "#cfd6dc"; ctx.font = "9px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
       ctx.fillText(G.unitName(key), rx + 24, ry + rh / 2);
       ctx.fillStyle = "#86d68a"; ctx.textAlign = "right"; ctx.fillText(G.baseTimeOf(key) + "s", rx + rw - 4, ry + rh / 2); ctx.textAlign = "left";
-      Input.popupRects.push({ key, x: rx, y: ry, w: rw, h: rh });
+      Input.popupRects.push({ x: rx, y: ry, w: rw, h: rh, act: () => f.setQueue(key) });
       yy += rowH;
     });
 
-    // detail box: stats + note for the hovered (or selected) unit
     const dkey = hover >= 0 ? keys[hover] : f.queueKey;
-    const st = INFANTRY_TYPES[dkey] || VEHICLE_TYPES[dkey] || GUN_TYPES[dkey];
-    const dy0 = py + headH + keys.length * rowH + 2;
-    ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fillRect(px + 4, dy0, W - 8, detailH);
-    ctx.font = "8px monospace"; ctx.textAlign = "left";
-    ctx.fillStyle = "#ffd24a";
-    const hp = st.hp !== undefined ? `HP ${st.hp}` : `ARM ${st.armour}`;
-    ctx.fillText(`${hp}  DMG ${st.dmg}  RNG ${st.range}  SPD ${st.speed}`, px + 8, dy0 + 9);
-    ctx.fillStyle = "#9fb0c0";
-    ctx.fillText(UNIT_NOTES[dkey] || "", px + 8, dy0 + 21);
+    this._popupDetail(ctx, px, py + headH + keys.length * rowH + 2, W, dkey);
+  },
+
+  // HQ command popup over the fort: train / instant mana builds / upgrades.
+  _drawFortPopup(ctx) {
+    const fort = Input.selectedFort;
+    if (!fort) return;
+    const team = fort.team, mana = Math.floor(this.mana[team]);
+    const W = 220, cell = 24, headH = 18, labH = 11, detailH = 44;
+    const cols = Math.floor((W - 8) / cell);
+    const trainRows = Math.ceil(FORT_TRAIN_KEYS.length / cols);
+    const instRows = Math.ceil(INSTANT_KEYS.length / cols);
+    const upH = 16 * 2 + 4;
+    const H = headH + labH + trainRows * cell + labH + instRows * cell + labH + upH + detailH + 10;
+    const fsx = fort.x - this.cam.x, fsy = fort.y - this.cam.y;
+    let px = Util.clamp(Math.round(fsx - W / 2), 4, CFG.VIEW_W - W - 4);
+    let py = Math.round(fsy - fort.h / 2 - 8 - H);
+    if (py < 4) py = Math.round(fsy + fort.h / 2 + 8);
+    py = Util.clamp(py, 4, CFG.VIEW_H - H - 4);
+
+    this._popupPanel(ctx, px, py, W, H);
+    // header: title + mana bar
+    ctx.fillStyle = "#e8d98a"; ctx.font = "bold 10px monospace"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillText("HEADQUARTERS", px + 8, py + 9);
+    ctx.fillStyle = "#b98aff"; ctx.textAlign = "right";
+    ctx.fillText(`⚡${mana}/${CFG.MANA_MAX}`, px + W - 8, py + 9); ctx.textAlign = "left";
+    ctx.fillStyle = "#1c1430"; ctx.fillRect(px + 4, py + headH - 3, W - 8, 2);
+    ctx.fillStyle = "#b98aff"; ctx.fillRect(px + 4, py + headH - 3, (W - 8) * (mana / CFG.MANA_MAX), 2);
+
+    const m = Input.mouse; let hoverKey = null, hoverUp = null;
+    const label = (text, y) => { ctx.fillStyle = "#6c7a72"; ctx.font = "8px monospace"; ctx.fillText(text, px + 6, y + labH / 2 + 1); };
+
+    // icon grid helper for train / instant sections
+    const grid = (keys, y0, mode) => {
+      keys.forEach((key, i) => {
+        const gx = px + 4 + (i % cols) * cell, gy = y0 + Math.floor(i / cols) * cell;
+        const rw = cell - 2, rh = cell - 2;
+        const over = m.in && m.x >= gx && m.x <= gx + rw && m.y >= gy && m.y <= gy + rh;
+        if (over) hoverKey = key;
+        const cost = this.manaCost(key);
+        const cantPay = mode === "instant" && mana < cost;
+        const active = mode === "train" && fort.trainKey === key;
+        ctx.fillStyle = active ? "rgba(77,166,255,0.30)" : over ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.05)";
+        ctx.fillRect(gx, gy, rw, rh);
+        if (active) { ctx.fillStyle = "#4da6ff"; ctx.fillRect(gx, gy, rw, 2); }
+        this._unitIcon(ctx, key, gx + rw / 2, gy + rh / 2 - 2);
+        if (mode === "instant") {
+          ctx.fillStyle = cantPay ? "#5a4a6a" : "#b98aff"; ctx.font = "7px monospace"; ctx.textAlign = "center";
+          ctx.fillText(String(cost), gx + rw / 2, gy + rh - 3); ctx.textAlign = "left";
+          if (cantPay) { ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(gx, gy, rw, rh); }
+          else Input.popupRects.push({ x: gx, y: gy, w: rw, h: rh, act: () => this.instantBuild(team, key) });
+        } else {
+          Input.popupRects.push({ x: gx, y: gy, w: rw, h: rh, act: () => fort.setTrain(key) });
+        }
+      });
+    };
+
+    let yy = py + headH;
+    label("TRAIN (continuous)", yy); yy += labH;
+    grid(FORT_TRAIN_KEYS, yy, "train"); yy += trainRows * cell;
+    label("INSTANT BUILD (mana)", yy); yy += labH;
+    grid(INSTANT_KEYS, yy, "instant"); yy += instRows * cell;
+    label("UPGRADES (mana)", yy); yy += labH;
+
+    // 2x2 upgrade buttons with level pips
+    UPGRADE_DEFS.forEach((def, i) => {
+      const bw = (W - 12) / 2, bx = px + 4 + (i % 2) * (bw + 4), by = yy + Math.floor(i / 2) * 18;
+      const lvl = this.upgrades[team][def.key], maxed = lvl >= CFG.UPGRADE_MAX;
+      const cost = maxed ? 0 : CFG.UPGRADE_COST[lvl];
+      const over = m.in && m.x >= bx && m.x <= bx + bw && m.y >= by && m.y <= by + 16;
+      if (over) hoverUp = def;
+      const cantPay = !maxed && mana < cost;
+      ctx.fillStyle = over && !maxed && !cantPay ? "rgba(185,138,255,0.25)" : "rgba(255,255,255,0.06)";
+      ctx.fillRect(bx, by, bw, 16);
+      ctx.fillStyle = maxed ? "#86d68a" : cantPay ? "#5a4a6a" : "#cfd6dc"; ctx.font = "8px monospace";
+      ctx.fillText(maxed ? `${def.name} MAX` : `${def.name} ⚡${cost}`, bx + 4, by + 8);
+      for (let p = 0; p < CFG.UPGRADE_MAX; p++) {                      // level pips
+        ctx.fillStyle = p < lvl ? "#b98aff" : "#2b2438";
+        ctx.fillRect(bx + bw - 16 + p * 5, by + 6, 3, 3);
+      }
+      if (!maxed && !cantPay) Input.popupRects.push({ x: bx, y: by, w: bw, h: 16, act: () => this.buyUpgrade(team, def.key) });
+    });
+    yy += upH;
+
+    if (hoverUp) {
+      ctx.fillStyle = "rgba(255,255,255,0.06)"; ctx.fillRect(px + 4, yy, W - 8, detailH);
+      ctx.fillStyle = "#8fd0ff"; ctx.font = "8px monospace"; ctx.textBaseline = "alphabetic";
+      ctx.fillText(`${hoverUp.name}: +${Math.round(CFG.UPGRADE_STEP * 100)}% per level`, px + 8, yy + 14);
+      ctx.fillStyle = "#9fb0c0";
+      ctx.fillText("Applies to every unit, present and future.", px + 8, yy + 26);
+    } else {
+      this._popupDetail(ctx, px, yy, W, hoverKey || fort.trainKey);
+    }
   },
 
   _drawMinimap(ctx) {

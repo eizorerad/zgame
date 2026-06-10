@@ -108,12 +108,15 @@ const Input = {
     return true;
   },
 
-  // clicking a row in the factory popup sets that factory's production
+  // clicking an entry in any building popup runs its action
+  // (factory: set production; HQ: train / instant build / upgrade)
   _popupClick(p) {
-    if (!this.selectedFactory) return false;
+    if (!this.selectedFactory && !this.selectedFort) return false;
     for (const r of this.popupRects) {
       if (p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) {
-        this.selectedFactory.setQueue(r.key); return true;
+        if (r.act) r.act();
+        UI.refreshFactoryPanel();
+        return true;
       }
     }
     return false;
@@ -264,7 +267,7 @@ const UI = {
     const e = this.el;
     e.blueSectors.textContent = Sectors.countOwned(TEAM.BLUE);
     e.redSectors.textContent = Sectors.countOwned(TEAM.RED);
-    e.blueUnits.textContent = G.unitCount(TEAM.BLUE);
+    e.blueUnits.textContent = `${G.unitCount(TEAM.BLUE)}/${CFG.MAX_POP}`;
     e.redUnits.textContent = G.unitCount(TEAM.RED);
     e.blueSpeed.textContent = Sectors.speedMultiplier(TEAM.BLUE).toFixed(1);
     e.redSpeed.textContent = Sectors.speedMultiplier(TEAM.RED).toFixed(1);
