@@ -8,3 +8,7 @@ global_mean_temp_change,Global,since_pre_industrial,~1.1-1.2,degC_total,context,
 warming_rate_south,South Yakutia,1966-2020,+2.4,degC_total,cyberleninka,"Annual warming trend, stable since late 1980s"
 projection_basis,Sakha Republic (Yakutia),2011-2030 vs 1981-2000,CMIP5/RCP,scenario,voeikov_mgo,"Russian climate-center scenario projections (CMIP5); near-term horizon 2011-2030"
 projected_warming_to_2030,Central Yakutia,2025-2030,~0.06,degC_per_year,projection,"Assumption used in model_ready.csv temp_anomaly_modeled_c: continue ~0.6 degC/decade observed rate"
+yakutsk_annual_temp_norm,Yakutsk station (WMO 24959),long-term norm,-8.8,degC,pogodaiklimat,"Long-term mean annual air temperature, observed"
+yakutsk_annual_temp_2017,Yakutsk station (WMO 24959),2017,-6.7,degC,ysia,"Previous record-warm year (observed annual mean)"
+yakutsk_annual_temp_2020,Yakutsk station (WMO 24959),2020,-5.9,degC,ysia,"Record-warm year, anomaly +2.9 degC vs norm (observed annual mean)"
+yakutsk_annual_temp_recent,Yakutsk station (WMO 24959),post-2020,~-7,degC,ysia,"Several recent years near -7 degC (warmer than -8.8 norm)"
