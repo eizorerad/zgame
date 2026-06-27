@@ -1,0 +1,11 @@
+district_ru,district_en,endemic_status,endemic_since,bites_2022,bites_2023,bites_2025,position_in_yakutia,notes
+Ленский,Lensky,endemic,2023,186,278,314,southwest,"Consistently the most affected district; in 2011-2012 only 18-19 sought help"
+Алданский,Aldansky,endemic,2023,,98,126,south,"Second most affected; acaricide treatments conducted"
+Нерюнгринский,Neryungrinsky,endemic,2023,,82,91,south (southernmost),"1 confirmed TBE case + 2 borreliosis in 2023"
+Олёкминский,Olekminsky,endemic,2023,,,,southwest,"1 borreliosis case 2023"
+Сунтарский,Suntarsky,endemic,2023,,,,west (Vilyuy basin),"Added to endemic list 2023"
+Хангаласский,Khangalassky,endemic,2023,,,,central (just south of Yakutsk),"Northernmost endemic district; borders Yakutsk area - marks the leading edge of northward spread"
+Мирнинский,Mirninsky,acaricide_treated,,,,,west,"Acaricide treatment site; not on endemic list"
+Горный,Gorny,bites_recorded,,,,,central,"Tick bites recorded (e.g. 1 in 2022) - north/central, beyond historic range"
+Намский,Namsky,bites_recorded,,,,,central (north of Yakutsk),"Tick bites recorded - notable as it lies NORTH of Yakutsk"
+городской округ Якутск,Yakutsk city,bites_recorded,,,,,central,">50 bites recorded in city in a season; hub for imported/autochthonous cases"

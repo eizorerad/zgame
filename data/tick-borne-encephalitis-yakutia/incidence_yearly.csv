@@ -1,0 +1,12 @@
+year,tick_bites_registered,bites_metric,reported_as_of,tbe_confirmed_cases,borreliosis_confirmed_cases,infected_ticks_found,data_quality,source_key,notes
+2001,2,registered_bites_republic,season_end,,,,low,yakutiaprime,"Earliest reference point; ticks then mostly confined to South Yakutia"
+2010,109,registered_bites_republic,season_end,,,,low,yakutiaprime,"Sharp rise vs 2001 cited as evidence of range expansion"
+2011,105,registered_bites_republic,season_end,,,,low,yakutiaprime,"Lensky district 2011-2012: only 18-19 people sought help (vs 186 in 2022)"
+2015,235,registered_bites_republic,season_end,,,,medium,ysia,"Baseline for the 1.5x growth cited for 2016"
+2016,360,registered_bites_republic,season_end,,,,medium,ysia,"Stated as 1.5x of 2015"
+2018,12,local_autochthonous,apr_aug,,,,conflicting,aif,"Apr-Aug count; DIFFERENT METRIC from the 2015/2016 republic totals - do not mix on same axis"
+2019,20,local_autochthonous,apr_aug,,,,conflicting,aif,"Apr-Aug count; DIFFERENT METRIC - see notes/README"
+2021,336,registered_bites_republic,season_end,1,,,low,derived,"Derived: 2022 (565) reported as +68% over prior year -> ~336; 1 encephalitis-positive tick reported (Lensky)"
+2022,565,registered_bites_republic,season_end,0,0,11,high,aif,"+68% vs 2021. Lensky district 186 bites (44 children). 11 of >100 tested ticks carried borreliosis"
+2023,581,registered_bites_republic,partial_season,1,4,,medium,aif,"14 districts + Yakutsk; 24 imported. Lensky 278, Aldan 98, Neryungri 82. 1 TBE (Neryungri) + 4 borreliosis (2 Neryungri, 1 Olekma, 1 Lensky). Year attribution of the 581 total is uncertain"
+2025,716,registered_bites_republic,aug_14_final_partial,1,,1,medium,aif_sakhaday,"19 districts + Yakutsk. Progressive within season: 684 by Aug 7, 701 by Aug 14, 716 reported. 26 imported. Lensky 314, Aldan 126, Neryungri 91. >=1 encephalitis-positive tick early season"

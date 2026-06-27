@@ -1,0 +1,7 @@
+indicator,region,period,value,unit,source_key,notes
+mean_annual_temp_change,Sakha Republic (Yakutia) overall,1966-2023,+3.0,degC_total,ysia_ulus_media,"Analysis across 97 active meteorological stations"
+warming_rate_central,Central Yakutia,last_30_years,0.5-0.7,degC_per_decade,cyberleninka,"Surface air temperature trend"
+warming_rate_far_north,Far North of Yakutia,last_30_years,~1.0,degC_per_decade,cyberleninka,"~+3 degC over 30 years; warming faster in the north"
+warming_min_districts,"Aldan, Olekminsk, Yugorenok, Ust-Charky",1966-2023,1.5-1.9,degC_total,ysia,"Smallest observed trends in the republic"
+warming_season_bias,Sakha Republic (Yakutia),1966-2023,winter-dominated,qualitative,ysia,"Warming driven mainly by rising winter temperatures; milder winters aid tick overwintering"
+global_mean_temp_change,Global,since_pre_industrial,~1.1-1.2,degC_total,context,"For comparison; Yakutia warms substantially faster than global mean (Arctic amplification)"
