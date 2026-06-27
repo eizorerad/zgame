@@ -1,32 +1,32 @@
-year,t_index,is_forecast,tick_bites_registered,target_quality,population_thousands,pop_quality,bites_per_100k,temp_anomaly_modeled_c,n_endemic_districts,northernmost_bite_lat,tbe_confirmed_cases,row_notes
-2000,0,0,,,962.0,interp,,0.00,0,56.7,,"Baseline year; ticks confined to far South Yakutia (~Neryungri 56.7N)"
-2001,1,0,2,low,961.0,interp,0.21,0.06,0,56.7,,"2 registered bites"
-2002,2,0,,,949.3,census,,0.12,0,57.0,,"2002 census 949.3k"
-2003,3,0,,,950.0,interp,,0.18,0,57.0,,
-2004,4,0,,,950.5,interp,,0.24,0,57.5,,
-2005,5,0,,,951.0,interp,,0.30,0,57.5,,
-2006,6,0,,,951.5,interp,,0.36,0,58.0,,
-2007,7,0,,,952.0,interp,,0.42,0,58.0,,
-2008,8,0,,,953.0,interp,,0.48,0,58.0,,
-2009,9,0,,,956.0,interp,,0.54,0,58.5,,
-2010,10,0,109,low,958.5,census,11.37,0.60,0,58.6,,"Sharp rise vs 2001 cited as range-expansion evidence (Aldan ~58.6N)"
-2011,11,0,105,low,958.0,interp,10.96,0.66,0,58.6,,"Lensky 2011-2012: only 18-19 sought help"
-2012,12,0,,,955.0,interp,,0.72,0,59.0,,
-2013,13,0,,,955.0,interp,,0.78,0,59.5,,
-2014,14,0,,,956.0,interp,,0.84,0,60.0,,
-2015,15,0,235,medium,959.7,census,24.49,0.90,0,60.5,,"Baseline for the x1.5 growth cited for 2016"
-2016,16,0,360,medium,962.8,census,37.39,0.96,0,60.7,,"Stated as x1.5 of 2015 (Lensky ~60.7N)"
-2017,17,0,,,964.3,census,,1.02,0,61.0,,"Gap - Rospotrebnadzor RS(Ya) season report exists, not retrieved"
-2018,18,0,,,967.0,census,,1.08,0,61.0,,"Gap (narrow apr-aug count of 12 is a DIFFERENT metric, excluded here)"
-2019,19,0,,,972.0,census,,1.14,0,61.5,,"Gap (narrow apr-aug count of 20 is a DIFFERENT metric, excluded here)"
-2020,20,0,,,995.7,census,,1.20,0,62.0,,"Gap - reached Yakutsk area ~62.0N"
-2021,21,0,336,low,997.0,interp,33.70,1.26,0,62.0,1,"Derived: 2022=+68% over prior year; 1 encephalitis-positive tick (Lensky)"
-2022,22,0,565,high,997.6,census,56.64,1.32,0,62.3,0,"+68% vs 2021; Lensky 186 (44 children); 11 borreliosis-positive ticks"
-2023,23,0,581,medium,997.6,census,58.24,1.38,6,62.5,1,"6 districts endemic from 2023; Lensky 278, Aldan 98, Neryungri 82; 1 TBE Neryungri + 4 borreliosis"
-2024,24,0,716,conflicting,1004.1,census,71.31,1.44,6,62.7,1,"701 by Aug 14 / 716 total (19 districts); Lensky 314, Aldan 126, Neryungri 91. YEAR DISPUTED - sources attribute same 701-on-Aug-14 figure to 2024 AND 2025"
-2025,25,0,,,1006.0,proj,,1.50,6,62.7,,"Left blank pending confirmation (716 may belong here instead of 2024)"
-2026,26,1,,,1008.0,proj,,1.56,6,,,"FORECAST ROW - predictors filled, target to be predicted"
-2027,27,1,,,1010.0,proj,,1.62,7,,,"FORECAST ROW (assumes 1 more district turns endemic)"
-2028,28,1,,,1012.0,proj,,1.68,7,,,"FORECAST ROW"
-2029,29,1,,,1014.0,proj,,1.74,8,,,"FORECAST ROW"
-2030,30,1,,,1016.0,proj,,1.80,8,,,"FORECAST ROW - horizon"
+year,t_index,is_forecast,tick_bites_registered,target_quality,population_thousands,pop_quality,bites_per_100k,temp_anomaly_modeled_c,n_districts_with_bites,n_endemic_official,tbe_confirmed_cases,row_notes
+2000,0,0,7,low,962,interp,0.7,0.0,,0,,"Isolated cases, far South Yakutia only (Nikiforov 2015, reconstructed from Fig.2; sum 2000-09=363 verified)"
+2001,1,0,2,low,961,interp,0.2,0.06,,0,,
+2002,2,0,68,low,949.3,census,7.2,0.12,,0,,
+2003,3,0,28,low,950,interp,2.9,0.17,,0,,
+2004,4,0,13,low,950.5,interp,1.4,0.23,,0,,
+2005,5,0,24,low,951,interp,2.5,0.29,,0,,
+2006,6,0,44,high,951.5,interp,4.6,0.35,6,0,,
+2007,7,0,28,high,952,interp,2.9,0.41,7,0,,
+2008,8,0,75,high,953,interp,7.9,0.46,12,0,,
+2009,9,0,74,high,956,interp,7.7,0.52,10,0,,
+2010,10,0,109,high,958.5,census,11.4,0.58,8,0,,
+2011,11,0,105,high,958,interp,11.0,0.64,13,0,,
+2012,12,0,110,high,955,census,11.5,0.7,14,0,,
+2013,13,0,123,high,955,census,12.9,0.75,14,0,,
+2014,14,0,199,high,956,census,20.8,0.81,18,0,,Atmosphere2021=199 (Nikiforov2015 Fig=197; +-2)
+2015,15,0,235,high,959.7,census,24.5,0.87,18,0,,
+2016,16,0,360,high,962.8,census,37.4,0.93,18,0,,Local peak before 2017-18 dip - series is NON-monotonic
+2017,17,0,340,high,964.3,census,35.3,0.99,20,0,,FILLED from Atmosphere2021 (was a gap); note decline vs 2016
+2018,18,0,254,high,967,census,26.3,1.04,15,0,,"FILLED from Atmosphere2021; 21 districts affected, incl Verkhoyansk (above Arctic Circle)"
+2019,19,0,,,972,census,,1.1,,0,,GAP - no reliable republic total
+2020,20,0,,,995.7,census,,1.16,,0,,GAP - no reliable republic total
+2021,21,0,336,low,997,interp,33.7,1.22,,0,1,Derived (2022=+68%); 1 TBE-positive tick (Lensky)
+2022,22,0,565,high,997.6,census,56.6,1.28,,0,,Lensky 186; 11 borreliosis-positive ticks of ~100 tested
+2023,23,0,581,conflicting,997.6,census,58.2,1.33,,6,1,Mid-season: 536 by Aug14 (17 distr) / 581 (14 distr); year attribution uncertain
+2024,24,0,716,conflicting,1004.1,census,71.3,1.39,,6,1,Mid-season ~684-716 (19 distr); same 'Aug14=701' figure attributed to 2024 AND 2025 in sources
+2025,25,1,,,1006,proj,,1.45,,6,,
+2026,26,1,,,1008,proj,,1.51,,6,,
+2027,27,1,,,1010,proj,,1.57,,6,,
+2028,28,1,,,1012,proj,,1.62,,6,,
+2029,29,1,,,1014,proj,,1.68,,6,,
+2030,30,1,,,1016,proj,,1.74,,6,,

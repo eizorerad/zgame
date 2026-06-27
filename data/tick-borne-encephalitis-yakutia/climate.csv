@@ -12,3 +12,7 @@ yakutsk_annual_temp_norm,Yakutsk station (WMO 24959),long-term norm,-8.8,degC,po
 yakutsk_annual_temp_2017,Yakutsk station (WMO 24959),2017,-6.7,degC,ysia,"Previous record-warm year (observed annual mean)"
 yakutsk_annual_temp_2020,Yakutsk station (WMO 24959),2020,-5.9,degC,ysia,"Record-warm year, anomaly +2.9 degC vs norm (observed annual mean)"
 yakutsk_annual_temp_recent,Yakutsk station (WMO 24959),post-2020,~-7,degC,ysia,"Several recent years near -7 degC (warmer than -8.8 norm)"
+warming_rate_central_stations,Central Yakutia (Yakutsk/Pokrovsk/Churapcha/Amga),1961-2018,0.058,degC_per_year,Atmosphere2021_Vladimirov,"Mean of 4 station linear trends; peer-reviewed (ERA5+station)"
+warming_rate_northern_stations,Northern Yakutia (Verkhoyansk/Oymyakon),1961-2018,0.049,degC_per_year,Atmosphere2021_Vladimirov,"Mean of 2 station linear trends"
+warming_district_max_NW,NW districts,1981/82 vs 2017/18,up_to_3,degC_total,Atmosphere2021_Vladimirov,"Largest district-level increase; all districts warmed"
+selyaninov_htc,Sakha (warm season),model_predictor,significant,coefficient,Atmosphere2021_Vladimirov,"Selyaninov hydrothermal coeff (warm-season moisture) was a significant predictor of tick bites; summer temp was NOT"
